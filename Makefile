@@ -1,18 +1,26 @@
-install:
+UV_CACHE_DIR := $(CURDIR)/.uv-cache
+TMPDIR := $(CURDIR)/.tmp
+export UV_CACHE_DIR
+export TMPDIR
+
+init-dirs:
+	mkdir -p "$(UV_CACHE_DIR)" "$(TMPDIR)"
+
+install: init-dirs
 	uv sync --python 3.11
 
-run:
-	uv run main.py $(ARGS)
+run: init-dirs
+	uv run -m src $(ARGS)
 
-debug:
-	uv run -m pdb main.py $(ARGS)
+debug: init-dirs
+	uv run -m pdb -m src $(ARGS)
 
 clean:
 	find . -type f -name '*.py[co]' -delete
-	rm -rf .mypy_cache .pytest_cache
+	rm -rf .mypy_cache .pytest_cache .uv-cache .tmp
 	find . -type d -name __pycache__ -exec rm -rf {} +
 
-lint:
+lint: init-dirs
 	uv run flake8 *.py
 	uv run mypy *.py\
 		--warn-return-any \
@@ -22,8 +30,8 @@ lint:
 		--check-untyped-defs \
 		--exclude '(^\.venv/)'
 
-lint-strict:
+lint-strict: init-dirs
 	uv run flake8 *.py
 	uv run mypy *.py --strict --exclude '(^\.venv/)'
 
-.PHONY: install run debug clean lint lint-strict
+.PHONY: init-dirs install run debug clean lint lint-strict
