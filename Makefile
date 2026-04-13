@@ -20,9 +20,9 @@ clean:
 	rm -rf .mypy_cache .pytest_cache .uv-cache .tmp
 	find . -type d -name __pycache__ -exec rm -rf {} +
 
-lint: init-dirs
-	uv run flake8 *.py
-	uv run mypy *.py\
+lint: install
+	uv run flake8 --jobs 1 src
+	uv run mypy src\
 		--warn-return-any \
 		--warn-unused-ignores \
 		--ignore-missing-imports \
@@ -30,8 +30,8 @@ lint: init-dirs
 		--check-untyped-defs \
 		--exclude '(^\.venv/)'
 
-lint-strict: init-dirs
-	uv run flake8 *.py
-	uv run mypy *.py --strict --exclude '(^\.venv/)'
+lint-strict: install
+	uv run flake8 --jobs 1 src
+	uv run mypy src --strict --exclude '(^\.venv/)'
 
 .PHONY: init-dirs install run debug clean lint lint-strict
