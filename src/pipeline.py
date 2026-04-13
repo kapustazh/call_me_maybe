@@ -6,15 +6,6 @@ from pydantic import BaseModel, ConfigDict, Field
 import numpy as np
 
 
-class Promptisation(BaseModel):
-    prompt: str
-    model_config = ConfigDict(extra="forbid")
-
-    # boilerplate code for pydantic
-    def execute(self, _prompt: str | None = None) -> str:
-        return self.prompt
-
-
 class Tokenization(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
     model: Small_LLM_Model = Field(exclude=True)
@@ -25,14 +16,6 @@ class Tokenization(BaseModel):
 
     def decode(self, tokens: list[int]) -> str:
         return self.model.decode(tokens)
-
-
-class TokenIndexer(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    def execute(self, token_ids: list[int]) -> list[int]:
-        # Identity stage kept for compatibility with your initial design.
-        return token_ids
 
 
 class LLMProcessing(BaseModel):
