@@ -5,9 +5,8 @@ with a small 0.5B parameter model
 
 """
 
-from llm_sdk import Small_LLM_Model
 from argparse import Namespace
-from src.manager import build_inference
+from src.pipeline import Pipeline
 import argparse
 
 # import logging
@@ -44,12 +43,11 @@ def main() -> None:
         help="Path to the <name>.json for the output",
     )
     args: Namespace = parser.parse_args()
-    _ = args
-    with open(args.input, "r", encoding="utf-8") as f:
-        prompt_text = f.read()
-
-    llm_sdk = Small_LLM_Model()
-    build_inference(prompt_text, llm_sdk, max_new_tokens=15)
+    try:
+        pipeline = Pipeline(args.functions_definition, args.input, args.output)
+        pipeline.run()
+    except Exception as e:
+        print(f"{e=}")
 
 
 if __name__ == "__main__":
