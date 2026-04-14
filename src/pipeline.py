@@ -1,3 +1,4 @@
+from typing import Any
 from llm_sdk import Small_LLM_Model
 
 # from pydantic import BaseModel, ConfigDict, Field
@@ -23,19 +24,23 @@ class Pipeline:
         )
 
     def run(self) -> None:
-        with open(self.input_path, "r", encoding="utf-8") as f:
-            prompt_text: str = f.read()
+        with open(file=self.input_path, mode="r", encoding="utf-8") as f:
+            input_text: str = f.read()
 
-        context_ids = self.model.encode(prompt_text)[0].tolist()
+        with open(file=self.functions_path, mode="r", encoding="utf-8") as f:
+            functions_text: str = f.read()
+
+        input_ids = self.model.encode(text=input_text)[0].tolist()
+        functions_text = self.model.encode(text=functions_text)[0].tolist()
         generated_ids: list[int] = []
         for _ in range(10):
-            logits = self.model.get_logits_from_input_ids(
-                input_ids=context_ids
+            logits: list[float] = self.model.get_logits_from_input_ids(
+                input_ids=input_ids
             )
             next_token_id = int(np.argmax(logits))
 
             generated_ids.append(next_token_id)
-            context_ids.append(next_token_id)
+            input_ids.append(next_token_id)
 
         generated_text = self.model.decode(generated_ids)
         print(generated_text)
