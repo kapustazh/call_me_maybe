@@ -5,16 +5,18 @@ with a small 0.5B parameter model
 
 """
 
+from argparse import Namespace
+from src.pipeline import Pipeline
 import argparse
 
-import logging
+# import logging
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
-logger = logging.getLogger(__name__)
+# logging.basicConfig(
+#     level=logging.INFO,
+#     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+#     datefmt="%Y-%m-%d %H:%M:%S",
+# )
+# logger = logging.getLogger(__name__)
 
 
 def main() -> None:
@@ -22,29 +24,33 @@ def main() -> None:
         prog="call_me_maybe",
         description="Translates prompts into function calls",
     )
-    parser.add_argument(
+    _ = parser.add_argument(
         "--functions_definition",
         type=str,
         default="data/input/functions_definition.json",
         help="Path to the <name>.json with function definitions",
     )
-    parser.add_argument(
+    _ = parser.add_argument(
         "--input",
         type=str,
         default="data/input/function_calling_tests.json",
         help="Path to the <name>.json for the function calling tests",
     )
-    parser.add_argument(
+    _ = parser.add_argument(
         "--output",
         type=str,
         default="data/output/function_calls.json",
         help="Path to the <name>.json for the output",
     )
-    args = parser.parse_args()
-    print(args)
+    args: Namespace = parser.parse_args()
+    try:
+        pipeline = Pipeline(args.functions_definition, args.input, args.output)
+        pipeline.run()
+    except Exception as e:
+        print(f"{e=}")
 
 
 if __name__ == "__main__":
-    logger.info("Start")
+    # logger.info(msg="Start")
     main()
-    logger.info("Finished succesfully")
+    # logger.info(msg="Finished succesfully")
