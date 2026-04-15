@@ -1,5 +1,5 @@
-from typing import Any
-from llm_sdk import Small_LLM_Model
+from llm_sdk.llm_sdk import Small_LLM_Model
+
 
 # from pydantic import BaseModel, ConfigDict, Field
 # import torch
