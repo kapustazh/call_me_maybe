@@ -1,9 +1,11 @@
-from llm_sdk.llm_sdk import Small_LLM_Model
-
+from llm_sdk import Small_LLM_Model
+import json
 
 # from pydantic import BaseModel, ConfigDict, Field
 # import torch
 import numpy as np
+
+from src.io_utils import load_function_definitions, load_prompt_items
 
 
 class Pipeline:
@@ -24,23 +26,37 @@ class Pipeline:
         )
 
     def run(self) -> None:
-        with open(file=self.input_path, mode="r", encoding="utf-8") as f:
-            input_text: str = f.read()
+        prompt_items = load_prompt_items(self.input_path)
+        function_definitions = load_function_definitions(self.functions_path)
 
-        with open(file=self.functions_path, mode="r", encoding="utf-8") as f:
-            functions_text: str = f.read()
+        from pprint import pprint
 
-        input_ids = self.model.encode(text=input_text)[0].tolist()
-        functions_text = self.model.encode(text=functions_text)[0].tolist()
-        generated_ids: list[int] = []
-        for _ in range(10):
-            logits: list[float] = self.model.get_logits_from_input_ids(
-                input_ids=input_ids
-            )
-            next_token_id = int(np.argmax(logits))
+        for item in prompt_items:
+            pprint(item)
 
-            generated_ids.append(next_token_id)
-            input_ids.append(next_token_id)
+        for item in function_definitions:
+            pprint(item)
+        # input_text = json.dumps(
+        #     [item.model_dump(mode="json") for item in prompt_items],
+        #     ensure_ascii=False,
+        # )
+        # functions_text = json.dumps(
+        #     [fn.model_dump(mode="json") for fn in function_definitions],
+        #     ensure_ascii=False,
+        # )
+        # print(input_text, functions_text, sep="\n\n\n")
+        # input_ids = self.model.encode(text=input_text)[0].tolist()
+        # function_ids = self.model.encode(text=functions_text)[0].tolist()
+        # input_ids.extend(function_ids)
+        # generated_ids: list[int] = []
+        # for _ in range(50):
+        #     logits: list[float] = self.model.get_logits_from_input_ids(
+        #         input_ids=input_ids
+        #     )
+        #     next_token_id = int(np.argmax(logits))
 
-        generated_text = self.model.decode(generated_ids)
-        print(generated_text)
+        #     generated_ids.append(next_token_id)
+        #     input_ids.append(next_token_id)
+
+        # generated_text = self.model.decode(generated_ids)
+        # print(generated_text)

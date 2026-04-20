@@ -1,0 +1,81 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from typing import Any, TypeVar
+
+from pydantic import TypeAdapter, ValidationError
+
+from src.models import FunctionDefinition, PromptItem
+
+T = TypeVar("T")
+
+
+class JsonFileError(ValueError):
+    """Raised when a JSON file cannot be read or parsed."""
+
+
+class JsonValidationError(ValueError):
+    """Raised when parsed JSON does not match the expected schema."""
+
+
+def load_json_file(path: str | Path) -> Any:
+    """Load a JSON file and return decoded Python data with clear errors."""
+    json_path = Path(path)
+
+    if not json_path.exists():
+        raise JsonFileError(f"JSON file not found: {json_path}")
+
+    if not json_path.is_file():
+        raise JsonFileError(f"Path is not a file: {json_path}")
+
+    try:
+        raw = json_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise JsonFileError(f"Cannot read file '{json_path}': {exc}") from exc
+
+    if raw.strip() == "":
+        raise JsonFileError(f"File is empty: {json_path}")
+
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError as exc:
+        msg = (
+            f"Invalid JSON in '{json_path}' at line {exc.lineno}, "
+            f"column {exc.colno}: {exc.msg}"
+        )
+        raise JsonFileError(msg) from exc
+
+
+def validate_json_data(data: Any, adapter: TypeAdapter[T], context: str) -> T:
+    """Validate decoded JSON using a TypeAdapter and return typed data."""
+    try:
+        return adapter.validate_python(data)
+    except ValidationError as exc:
+        raise JsonValidationError(
+            f"Schema validation failed for {context}: {exc}"
+        ) from exc
+
+
+def validate_json_file(path: str | Path) -> bool:
+    """Return True if file exists and contains syntactically valid JSON."""
+    _ = load_json_file(path)
+    return True
+
+
+def load_function_definitions(path: str | Path) -> list[FunctionDefinition]:
+    """Load and validate function definition list."""
+    data = load_json_file(path)
+    adapter = TypeAdapter(list[FunctionDefinition])
+    return validate_json_data(
+        data,
+        adapter,
+        f"function definitions file '{path}'",
+    )
+
+
+def load_prompt_items(path: str | Path) -> list[PromptItem]:
+    """Load and validate prompt item list."""
+    data = load_json_file(path)
+    adapter = TypeAdapter(list[PromptItem])
+    return validate_json_data(data, adapter, f"prompt tests file '{path}'")

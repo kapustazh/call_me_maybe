@@ -46,8 +46,8 @@ def main() -> None:
     try:
         pipeline = Pipeline(args.functions_definition, args.input, args.output)
         pipeline.run()
-    except Exception as e:
-        print(f"{e=}")
+    except Exception as exc:
+        print(f"{exc=}")
 
 
 if __name__ == "__main__":
