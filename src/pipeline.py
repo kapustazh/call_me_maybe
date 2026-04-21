@@ -1,9 +1,10 @@
 from llm_sdk import Small_LLM_Model
 import json
+import numpy as np
+
 
 # from pydantic import BaseModel, ConfigDict, Field
 # import torch
-import numpy as np
 
 from src.io_utils import load_function_definitions, load_prompt_items
 
@@ -36,6 +37,7 @@ class Pipeline:
 
         for item in function_definitions:
             pprint(item)
+
         # input_text = json.dumps(
         #     [item.model_dump(mode="json") for item in prompt_items],
         #     ensure_ascii=False,
