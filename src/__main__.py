@@ -46,6 +46,12 @@ def main() -> None:
     try:
         pipeline = Pipeline(args.functions_definition, args.input, args.output)
         pipeline.run()
+        # from llm_sdk import Small_LLM_Model
+
+        # m = Small_LLM_Model()
+        # ids = m.encode("Hello, world!")[0].tolist()
+        # for i in range(min(10, len(ids))):
+        #     print(ids[i], repr(m.decode([ids[i]])))
     except Exception as exc:
         print(f"{exc=}")
 

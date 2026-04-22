@@ -1,6 +1,10 @@
 from llm_sdk import Small_LLM_Model
-import json
-import numpy as np
+from src.vocab import Vocab
+
+# from importlib import Path
+
+# import json
+# import numpy as np
 
 
 # from pydantic import BaseModel, ConfigDict, Field
@@ -20,7 +24,7 @@ class Pipeline:
         self.functions_path: str = functions_path
         self.input_path: str = input_path
         self.output_path: str = output_path
-        self.model: Small_LLM_Model = (
+        self._model: Small_LLM_Model = (
             Small_LLM_Model(model_name=model)
             if model != ""
             else Small_LLM_Model()
@@ -29,14 +33,16 @@ class Pipeline:
     def run(self) -> None:
         prompt_items = load_prompt_items(self.input_path)
         function_definitions = load_function_definitions(self.functions_path)
+        vocab = Vocab(self._model.get_path_to_vocab_file())
+        vocab.print_vocab()
 
-        from pprint import pprint
+        # from pprint import pprint
 
-        for item in prompt_items:
-            pprint(item)
+        # for item in prompt_items:
+        #     pprint(item)
 
-        for item in function_definitions:
-            pprint(item)
+        # for item in function_definitions:
+        #     pprint(item)
 
         # input_text = json.dumps(
         #     [item.model_dump(mode="json") for item in prompt_items],
