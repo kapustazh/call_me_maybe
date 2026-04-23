@@ -1,11 +1,11 @@
 from __future__ import annotations
 from llm_sdk import Small_LLM_Model
-from src.models import FunctionDefinition, FunctionResult
+from src.models import FunctionDefinition
 from src.vocab import Vocab
 
 
 class ConstrainedDecoder:
-    def _init__(
+    def __init__(
         self,
         model: Small_LLM_Model,
         vocab: Vocab,
@@ -15,6 +15,7 @@ class ConstrainedDecoder:
         self._model = model
         self._vocab = vocab
         self._functions = {fn.name for fn in functions}
+        self._quote_id = self._model.encode('"')[0]
 
     def get_valid_number_ids(self) -> set[int]:
         allowed = set("0123456789-+.eE")  # +eE
