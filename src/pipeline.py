@@ -1,16 +1,15 @@
-from llm_sdk import Small_LLM_Model
-from src.vocab import Vocab
+from __future__ import annotations
 
-# from importlib import Path
-
-# import json
-# import numpy as np
-
-
-# from pydantic import BaseModel, ConfigDict, Field
-# import torch
-
-from src.io_utils import load_function_definitions, load_prompt_items
+from src.io_utils import (
+    load_function_definitions,
+    load_prompt_items,
+    write_json,
+)
+from src.function_selector import (
+    BobThePrompter,
+    FunctionSelector,
+    FunctionSelectorError,
+)
 
 
 class Pipeline:
@@ -24,47 +23,51 @@ class Pipeline:
         self.functions_path: str = functions_path
         self.input_path: str = input_path
         self.output_path: str = output_path
-        self._model: Small_LLM_Model = (
-            Small_LLM_Model(model_name=model)
-            if model != ""
-            else Small_LLM_Model()
-        )
+        self._model_name: str = model
 
     def run(self) -> None:
+        """
+        Test harness: build selection prompts + get model guess per prompt.
+        """
         prompt_items = load_prompt_items(self.input_path)
         function_definitions = load_function_definitions(self.functions_path)
-        vocab = Vocab(self._model.get_path_to_vocab_file())
-        vocab.print_vocab()
+        bob = BobThePrompter(functions=function_definitions)
 
-        # from pprint import pprint
+        selector: FunctionSelector | None = None
+        selector_error: str | None = None
+        try:
+            from llm_sdk import Small_LLM_Model  # type: ignore
 
-        # for item in prompt_items:
-        #     pprint(item)
+            model = (
+                Small_LLM_Model(model_name=self._model_name)
+                if self._model_name
+                else Small_LLM_Model()
+            )
+            selector = FunctionSelector(
+                model,
+                function_definitions,
+                confidence_threshold=0.0,
+            )
+        except Exception as exc:
+            selector_error = str(exc)
 
-        # for item in function_definitions:
-        #     pprint(item)
+        out: list[dict[str, object]] = []
+        for item in prompt_items:
+            row: dict[str, object] = {
+                "prompt": item.prompt,
+                "selection_prompt": bob.build_selection_prompt(item.prompt),
+            }
+            if selector is None:
+                if selector_error:
+                    row["model_error"] = selector_error
+            else:
+                try:
+                    sel = selector.select(item.prompt)
+                    row["model_guess"] = sel.name
+                    row["model_confidence"] = sel.confidence
+                    row["function_scores"] = sel.scores
+                except FunctionSelectorError as exc:
+                    row["model_error"] = str(exc)
+            out.append(row)
 
-        # input_text = json.dumps(
-        #     [item.model_dump(mode="json") for item in prompt_items],
-        #     ensure_ascii=False,
-        # )
-        # functions_text = json.dumps(
-        #     [fn.model_dump(mode="json") for fn in function_definitions],
-        #     ensure_ascii=False,
-        # )
-        # print(input_text, functions_text, sep="\n\n\n")
-        # input_ids = self.model.encode(text=input_text)[0].tolist()
-        # function_ids = self.model.encode(text=functions_text)[0].tolist()
-        # input_ids.extend(function_ids)
-        # generated_ids: list[int] = []
-        # for _ in range(50):
-        #     logits: list[float] = self.model.get_logits_from_input_ids(
-        #         input_ids=input_ids
-        #     )
-        #     next_token_id = int(np.argmax(logits))
-
-        #     generated_ids.append(next_token_id)
-        #     input_ids.append(next_token_id)
-
-        # generated_text = self.model.decode(generated_ids)
-        # print(generated_text)
+        write_json(self.output_path, out)

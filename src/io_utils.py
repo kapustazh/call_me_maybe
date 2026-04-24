@@ -79,3 +79,15 @@ def load_prompt_items(path: str | Path) -> list[PromptItem]:
     data = load_json_file(path)
     adapter = TypeAdapter(list[PromptItem])
     return validate_json_data(data, adapter, f"prompt tests file '{path}'")
+
+
+def write_text(path: str | Path, text: str) -> None:
+    """Write text to file, creating parent dirs if needed."""
+    out_path = Path(path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(text, encoding="utf-8")
+
+
+def write_json(path: str | Path, data: object) -> None:
+    """Write data as formatted JSON to file."""
+    write_text(path, json.dumps(data, ensure_ascii=False, indent=2))

@@ -1,0 +1,145 @@
+[
+  {
+    "prompt": "What is the sum of 2 and 3?",
+    "selection_prompt": "You are a function calling router.\nPick best function for user request.\n\nUser request:\nWhat is the sum of 2 and 3?\n\nAvailable functions:\n- fn_add_numbers: Add two numbers together and return their sum.\n- fn_greet: Generate a greeting message for a person by name.\n- fn_reverse_string: Reverse a string and return the reversed result.\n- fn_get_square_root: Calculate the square root of a number.\n- fn_substitute_string_with_regex: Replace all occurrences matching a regex pattern in a string.\n\nReturn only function name.\nfn_",
+    "model_guess": "fn_add_numbers",
+    "model_confidence": 0.6610048140737419,
+    "function_scores": {
+      "fn_add_numbers": 0.07983916282682771,
+      "fn_greet": 2.8224017960244602e-05,
+      "fn_reverse_string": 0.001272310674879854,
+      "fn_get_square_root": 0.008245780108622952,
+      "fn_substitute_string_with_regex": 0.03139906300883814
+    }
+  },
+  {
+    "prompt": "What is the sum of 265 and 345?",
+    "selection_prompt": "You are a function calling router.\nPick best function for user request.\n\nUser request:\nWhat is the sum of 265 and 345?\n\nAvailable functions:\n- fn_add_numbers: Add two numbers together and return their sum.\n- fn_greet: Generate a greeting message for a person by name.\n- fn_reverse_string: Reverse a string and return the reversed result.\n- fn_get_square_root: Calculate the square root of a number.\n- fn_substitute_string_with_regex: Replace all occurrences matching a regex pattern in a string.\n\nReturn only function name.\nfn_",
+    "model_guess": "fn_add_numbers",
+    "model_confidence": 0.6452090472731989,
+    "function_scores": {
+      "fn_add_numbers": 0.06774967991358985,
+      "fn_greet": 2.4120749162245632e-05,
+      "fn_reverse_string": 0.0008327416752614571,
+      "fn_get_square_root": 0.0073685717379428015,
+      "fn_substitute_string_with_regex": 0.029029117033194232
+    }
+  },
+  {
+    "prompt": "Greet shrek",
+    "selection_prompt": "You are a function calling router.\nPick best function for user request.\n\nUser request:\nGreet shrek\n\nAvailable functions:\n- fn_add_numbers: Add two numbers together and return their sum.\n- fn_greet: Generate a greeting message for a person by name.\n- fn_reverse_string: Reverse a string and return the reversed result.\n- fn_get_square_root: Calculate the square root of a number.\n- fn_substitute_string_with_regex: Replace all occurrences matching a regex pattern in a string.\n\nReturn only function name.\nfn_",
+    "model_guess": "fn_get_square_root",
+    "model_confidence": 0.4150217659606469,
+    "function_scores": {
+      "fn_add_numbers": 0.028809478453158528,
+      "fn_greet": 0.0004700256760970555,
+      "fn_reverse_string": 0.02826120624657031,
+      "fn_get_square_root": 0.08427597720082634,
+      "fn_substitute_string_with_regex": 0.06124730596053866
+    }
+  },
+  {
+    "prompt": "Greet john",
+    "selection_prompt": "You are a function calling router.\nPick best function for user request.\n\nUser request:\nGreet john\n\nAvailable functions:\n- fn_add_numbers: Add two numbers together and return their sum.\n- fn_greet: Generate a greeting message for a person by name.\n- fn_reverse_string: Reverse a string and return the reversed result.\n- fn_get_square_root: Calculate the square root of a number.\n- fn_substitute_string_with_regex: Replace all occurrences matching a regex pattern in a string.\n\nReturn only function name.\nfn_",
+    "model_guess": "fn_get_square_root",
+    "model_confidence": 0.37654823310159263,
+    "function_scores": {
+      "fn_add_numbers": 0.03193372699223336,
+      "fn_greet": 0.0005586842460408887,
+      "fn_reverse_string": 0.02238678489864047,
+      "fn_get_square_root": 0.0719455534047024,
+      "fn_substitute_string_with_regex": 0.06424122044606177
+    }
+  },
+  {
+    "prompt": "Reverse the string 'hello'",
+    "selection_prompt": "You are a function calling router.\nPick best function for user request.\n\nUser request:\nReverse the string 'hello'\n\nAvailable functions:\n- fn_add_numbers: Add two numbers together and return their sum.\n- fn_greet: Generate a greeting message for a person by name.\n- fn_reverse_string: Reverse a string and return the reversed result.\n- fn_get_square_root: Calculate the square root of a number.\n- fn_substitute_string_with_regex: Replace all occurrences matching a regex pattern in a string.\n\nReturn only function name.\nfn_",
+    "model_guess": "fn_substitute_string_with_regex",
+    "model_confidence": 0.42156396700099974,
+    "function_scores": {
+      "fn_add_numbers": 0.001513327890007307,
+      "fn_greet": 1.9700311721713215e-05,
+      "fn_reverse_string": 0.025146905714980468,
+      "fn_get_square_root": 0.011167279383677644,
+      "fn_substitute_string_with_regex": 0.027583035061150448
+    }
+  },
+  {
+    "prompt": "Reverse the string 'world'",
+    "selection_prompt": "You are a function calling router.\nPick best function for user request.\n\nUser request:\nReverse the string 'world'\n\nAvailable functions:\n- fn_add_numbers: Add two numbers together and return their sum.\n- fn_greet: Generate a greeting message for a person by name.\n- fn_reverse_string: Reverse a string and return the reversed result.\n- fn_get_square_root: Calculate the square root of a number.\n- fn_substitute_string_with_regex: Replace all occurrences matching a regex pattern in a string.\n\nReturn only function name.\nfn_",
+    "model_guess": "fn_substitute_string_with_regex",
+    "model_confidence": 0.4309980792006491,
+    "function_scores": {
+      "fn_add_numbers": 0.00179381555013982,
+      "fn_greet": 2.1462572291556662e-05,
+      "fn_reverse_string": 0.027727589676004145,
+      "fn_get_square_root": 0.01294604536598413,
+      "fn_substitute_string_with_regex": 0.03218379286920842
+    }
+  },
+  {
+    "prompt": "What is the square root of 16?",
+    "selection_prompt": "You are a function calling router.\nPick best function for user request.\n\nUser request:\nWhat is the square root of 16?\n\nAvailable functions:\n- fn_add_numbers: Add two numbers together and return their sum.\n- fn_greet: Generate a greeting message for a person by name.\n- fn_reverse_string: Reverse a string and return the reversed result.\n- fn_get_square_root: Calculate the square root of a number.\n- fn_substitute_string_with_regex: Replace all occurrences matching a regex pattern in a string.\n\nReturn only function name.\nfn_",
+    "model_guess": "fn_get_square_root",
+    "model_confidence": 0.9185903952494946,
+    "function_scores": {
+      "fn_add_numbers": 0.0025883823606826016,
+      "fn_greet": 5.403538766578447e-05,
+      "fn_reverse_string": 0.001859289102036441,
+      "fn_get_square_root": 0.27326587326830026,
+      "fn_substitute_string_with_regex": 0.019716341639586344
+    }
+  },
+  {
+    "prompt": "Calculate the square root of 144",
+    "selection_prompt": "You are a function calling router.\nPick best function for user request.\n\nUser request:\nCalculate the square root of 144\n\nAvailable functions:\n- fn_add_numbers: Add two numbers together and return their sum.\n- fn_greet: Generate a greeting message for a person by name.\n- fn_reverse_string: Reverse a string and return the reversed result.\n- fn_get_square_root: Calculate the square root of a number.\n- fn_substitute_string_with_regex: Replace all occurrences matching a regex pattern in a string.\n\nReturn only function name.\nfn_",
+    "model_guess": "fn_get_square_root",
+    "model_confidence": 0.9158252255258011,
+    "function_scores": {
+      "fn_add_numbers": 0.0037635396100271085,
+      "fn_greet": 8.461382403072515e-05,
+      "fn_reverse_string": 0.0017091233878877901,
+      "fn_get_square_root": 0.27523947138155214,
+      "fn_substitute_string_with_regex": 0.019740367078000816
+    }
+  },
+  {
+    "prompt": "Replace all numbers in \"Hello 34 I'm 233 years old\" with NUMBERS",
+    "selection_prompt": "You are a function calling router.\nPick best function for user request.\n\nUser request:\nReplace all numbers in \"Hello 34 I'm 233 years old\" with NUMBERS\n\nAvailable functions:\n- fn_add_numbers: Add two numbers together and return their sum.\n- fn_greet: Generate a greeting message for a person by name.\n- fn_reverse_string: Reverse a string and return the reversed result.\n- fn_get_square_root: Calculate the square root of a number.\n- fn_substitute_string_with_regex: Replace all occurrences matching a regex pattern in a string.\n\nReturn only function name.\nfn_",
+    "model_guess": "fn_substitute_string_with_regex",
+    "model_confidence": 0.48926504154881434,
+    "function_scores": {
+      "fn_add_numbers": 0.006278322103583584,
+      "fn_greet": 9.899018594697452e-05,
+      "fn_reverse_string": 0.010661246251393348,
+      "fn_get_square_root": 0.08797901335307236,
+      "fn_substitute_string_with_regex": 0.10060291708225126
+    }
+  },
+  {
+    "prompt": "Replace all vowels in 'Programming is fun' with asterisks",
+    "selection_prompt": "You are a function calling router.\nPick best function for user request.\n\nUser request:\nReplace all vowels in 'Programming is fun' with asterisks\n\nAvailable functions:\n- fn_add_numbers: Add two numbers together and return their sum.\n- fn_greet: Generate a greeting message for a person by name.\n- fn_reverse_string: Reverse a string and return the reversed result.\n- fn_get_square_root: Calculate the square root of a number.\n- fn_substitute_string_with_regex: Replace all occurrences matching a regex pattern in a string.\n\nReturn only function name.\nfn_",
+    "model_guess": "fn_substitute_string_with_regex",
+    "model_confidence": 0.6218581163635213,
+    "function_scores": {
+      "fn_add_numbers": 0.0022118736599285116,
+      "fn_greet": 3.0463175835862715e-05,
+      "fn_reverse_string": 0.0036251379162583913,
+      "fn_get_square_root": 0.056056270068393046,
+      "fn_substitute_string_with_regex": 0.10183421879079134
+    }
+  },
+  {
+    "prompt": "Substitute the word 'cat' with 'dog' in 'The cat sat on the mat with another cat'",
+    "selection_prompt": "You are a function calling router.\nPick best function for user request.\n\nUser request:\nSubstitute the word 'cat' with 'dog' in 'The cat sat on the mat with another cat'\n\nAvailable functions:\n- fn_add_numbers: Add two numbers together and return their sum.\n- fn_greet: Generate a greeting message for a person by name.\n- fn_reverse_string: Reverse a string and return the reversed result.\n- fn_get_square_root: Calculate the square root of a number.\n- fn_substitute_string_with_regex: Replace all occurrences matching a regex pattern in a string.\n\nReturn only function name.\nfn_",
+    "model_guess": "fn_substitute_string_with_regex",
+    "model_confidence": 0.4737750188515661,
+    "function_scores": {
+      "fn_add_numbers": 0.007385631302820473,
+      "fn_greet": 0.00012357521718645717,
+      "fn_reverse_string": 0.021364279706545156,
+      "fn_get_square_root": 0.0759106860987362,
+      "fn_substitute_string_with_regex": 0.09434011116389004
+    }
+  }
+]
