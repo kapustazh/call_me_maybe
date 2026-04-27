@@ -1,22 +1,7 @@
-"""
-Your implementation must use constrained decoding to guarantee 100% valid JSON
-output, ensuring near-perfect reliability even
-with a small 0.5B parameter model
-
-"""
-
-from argparse import Namespace
-from src.pipeline import Pipeline
 import argparse
+from argparse import Namespace
 
-# import logging
-
-# logging.basicConfig(
-#     level=logging.INFO,
-#     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-#     datefmt="%Y-%m-%d %H:%M:%S",
-# )
-# logger = logging.getLogger(__name__)
+from src.pipeline import Pipeline
 
 
 def main() -> None:
@@ -39,24 +24,16 @@ def main() -> None:
     _ = parser.add_argument(
         "--output",
         type=str,
-        default="data/output/function_calls.json",
+        default="data/output/function_calling_results.json",
         help="Path to the <name>.json for the output",
     )
     args: Namespace = parser.parse_args()
     try:
         pipeline = Pipeline(args.functions_definition, args.input, args.output)
         pipeline.run()
-        # from llm_sdk import Small_LLM_Model
-
-        # m = Small_LLM_Model()
-        # ids = m.encode("Hello, world!")[0].tolist()
-        # for i in range(min(10, len(ids))):
-        #     print(ids[i], repr(m.decode([ids[i]])))
     except Exception as exc:
-        print(f"{exc=}")
+        print(f"Error: {exc}")
 
 
 if __name__ == "__main__":
-    # logger.info(msg="Start")
     main()
-    # logger.info(msg="Finished succesfully")

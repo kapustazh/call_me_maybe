@@ -13,7 +13,6 @@ import torch
 class Selection:
     name: str
     confidence: float
-    scores: dict[str, float]
 
 
 class FunctionSelectorError(Exception):
@@ -60,24 +59,22 @@ class FunctionSelector:
             ids.append(tok)
         return score ** (1.0 / len(name_ids))
 
+    
     def select(self, user_prompt: str) -> Selection:
         prefix = self._prompter.function_name_prefix()
         prompt = self._prompter.build_selection_prompt(user_prompt)
         base_ids = self._to_ids(self._model.encode(prompt))
 
         scores: list[float] = []
-        score_by_name: dict[str, float] = {}
         for fn in self._functions:
             name_suffix = fn.name.removeprefix(prefix)
             name_ids = self._to_ids(self._model.encode(name_suffix))
             if not name_ids:
                 score = 0.0
                 scores.append(score)
-                score_by_name[fn.name] = score
                 continue
             score = self._name_score(base_ids, name_ids)
             scores.append(score)
-            score_by_name[fn.name] = score
 
         score_sum = sum(scores)
         probs = (
@@ -92,7 +89,6 @@ class FunctionSelector:
         best_guess = Selection(
             name=self._functions[best_ids].name,
             confidence=float(probs[best_ids]),
-            scores=score_by_name,
         )
 
         if best_guess.confidence < self._threshold:
