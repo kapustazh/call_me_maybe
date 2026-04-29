@@ -2,7 +2,7 @@
 
 Derived from [PLAN.md](PLAN.md). Check boxes as you go. Order matters inside each milestone unless noted.
 
----
+<!-- ---
 
 ## M1 — Input / output contract (mostly in place; verify + align)
 
@@ -11,7 +11,7 @@ Derived from [PLAN.md](PLAN.md). Check boxes as you go. Order matters inside eac
 - [ ] Set default `--output` in `__main__.py` to `data/output/function_calling_results.json` (or subject’s exact path from brief).
 - [ ] End-to-end dry run: valid inputs → one JSON object per test prompt in output file.
 
----
+--- -->
 
 ## M2 — Token id ↔ text (enables masking)
 

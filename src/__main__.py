@@ -29,7 +29,11 @@ def main() -> None:
     )
     args: Namespace = parser.parse_args()
     try:
-        pipeline = Pipeline(args.functions_definition, args.input, args.output)
+        pipeline = Pipeline(
+            args.functions_definition,
+            args.input,
+            args.output,
+        )
         pipeline.run()
     except Exception as exc:
         print(f"Error: {exc}")

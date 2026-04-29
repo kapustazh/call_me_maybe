@@ -3,7 +3,7 @@ from __future__ import annotations
 from src.io_utils import (
     load_function_definitions,
     load_prompt_items,
-    write_json,
+    write_function_results,
 )
 from src.function_selector import FunctionSelector
 from src.models import FunctionResult
@@ -16,11 +16,13 @@ class Pipeline:
         input_path: str,
         output_path: str,
         model: str = "",
+        selection_confidence_threshold: float = 0.90,
     ) -> None:
         self.functions_path: str = functions_path
         self.input_path: str = input_path
         self.output_path: str = output_path
         self._model_name: str = model
+        self._selection_confidence_threshold = selection_confidence_threshold
 
     def run(self) -> None:
         """
@@ -39,17 +41,17 @@ class Pipeline:
         selector = FunctionSelector(
             model,
             function_definitions,
-            confidence_threshold=0.0,
+            confidence_threshold=self._selection_confidence_threshold,
         )
 
-        out: list[dict[str, object]] = []
+        out: list[FunctionResult] = []
         for item in prompt_items:
             selection = selector.select(item.prompt)
             result = FunctionResult(
                 prompt=item.prompt,
-                name=selection.name,
+                name=selection,
                 parameters={},
             )
-            out.append(result.model_dump())
+            out.append(result)
 
-        write_json(self.output_path, out)
+        write_function_results(self.output_path, out)

@@ -1,5 +1,5 @@
 from __future__ import annotations
-from pydantic import BaseModel, StringConstraints, Field, RootModel
+from pydantic import BaseModel, ConfigDict, StringConstraints, Field, RootModel
 from typing import Any, Literal, Annotated
 
 NonEmptyStr = Annotated[
@@ -23,6 +23,8 @@ class FunctionDefinition(BaseModel):
 
 
 class FunctionResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     prompt: str
     name: str
     parameters: dict[str, Any]

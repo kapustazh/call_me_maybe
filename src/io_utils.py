@@ -6,7 +6,7 @@ from typing import Any, TypeVar
 
 from pydantic import TypeAdapter, ValidationError
 
-from src.models import FunctionDefinition, PromptItem
+from src.models import FunctionDefinition, FunctionResult, PromptItem
 
 T = TypeVar("T")
 
@@ -91,3 +91,11 @@ def write_text(path: str | Path, text: str) -> None:
 def write_json(path: str | Path, data: object) -> None:
     """Write data as formatted JSON to file."""
     write_text(path, json.dumps(data, ensure_ascii=False, indent=2))
+
+
+def write_function_results(
+    path: str | Path,
+    results: list[FunctionResult],
+) -> None:
+    """Write final result array with only prompt, name, parameters keys."""
+    write_json(path, [result.model_dump() for result in results])

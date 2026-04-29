@@ -1,19 +1,12 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+import math
 
 from llm_sdk import Small_LLM_Model
 from src.math_utils import softmax
 from src.models import FunctionDefinition
 from src.prompt import BobThePrompter
 import torch
-import numpy as np
-
-
-@dataclass(frozen=True)
-class Selection:
-    name: str
-    confidence: float
 
 
 class FunctionSelectorError(Exception):
@@ -41,24 +34,25 @@ class FunctionSelector:
         return t[0].tolist()
 
     def _name_score(self, base_ids: list[int], name_ids: list[int]) -> float:
-        """Score full candidate from token probabilities.
-
-        Uses geometric mean so shorter function names do not auto-win.
-        """
+        """Return average log probability for a candidate function name."""
         if not name_ids:
-            return 0.0
+            return -math.inf
+
         ids = list(base_ids)
-        score = 1.0
+        total_log_prob = 0.0
+
         for tok in name_ids:
             logits = self._model.get_logits_from_input_ids(ids)
             probs = softmax(logits)
-            if tok >= len(probs):
-                return 0.0
-            score *= float(probs[tok])
-            ids.append(tok)
-        return score ** (1.0 / len(name_ids))
+            if tok >= len(probs) or probs[tok] <= 0:
+                return -math.inf
 
-    def select(self, user_prompt: str) -> Selection:
+            total_log_prob += math.log(float(probs[tok]))
+            ids.append(tok)
+
+        return total_log_prob / len(name_ids)
+
+    def select(self, user_prompt: str) -> str:
         prefix = self._prompter.function_name_prefix()
         prompt = self._prompter.build_selection_prompt(user_prompt)
         base_ids = self._to_ids(self._model.encode(prompt))
@@ -68,28 +62,21 @@ class FunctionSelector:
             name_suffix = fn.name.removeprefix(prefix)
             name_ids = self._to_ids(self._model.encode(name_suffix))
             if not name_ids:
-                score = 0.0
+                score = -math.inf
                 scores.append(score)
                 continue
             score = self._name_score(base_ids, name_ids)
             scores.append(score)
 
-        score_sum = sum(scores)
-        probs = (
-            [score / score_sum for score in scores]
-            if score_sum > 0
-            else [1.0 / len(scores) for _ in scores]
-        )
+        probs = softmax(scores)
+        best_ids = max(range(len(probs)), key=probs.__getitem__)
+        best_name = self._functions[best_ids].name
+        # confidence = float(probs[best_ids])
 
-        best_ids = int(np.argmax(probs))
-        best_guess = Selection(
-            name=self._functions[best_ids].name,
-            confidence=float(probs[best_ids]),
-        )
+        # if confidence < self._threshold:
+        #     return (
+        #         f"Low selection confidence: {confidence:.3f} < "
+        #         f"{self._threshold:.3f} for candidate {best_name}"
+        #     )
 
-        if best_guess.confidence < self._threshold:
-            raise FunctionSelectorError(
-                f"Low selection confidence: {best_guess.confidence:.3f} < "
-                f"{self._threshold:.3f} for candidate {best_guess.name}"
-            )
-        return best_guess
+        return best_name
