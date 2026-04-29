@@ -17,7 +17,7 @@ debug: init-dirs
 
 clean:
 	find . -type f -name '*.py[co]' -delete
-	rm -rf .mypy_cache .pytest_cache .uv-cache .tmp
+	rm -rf .mypy_cache .pytest_cache .uv-cache .tmp .hf
 	find . -type d -name __pycache__ -exec rm -rf {} +
 
 lint: install

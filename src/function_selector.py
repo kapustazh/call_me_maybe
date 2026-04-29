@@ -7,6 +7,7 @@ from src.math_utils import softmax
 from src.models import FunctionDefinition
 from src.prompt import BobThePrompter
 import torch
+import numpy as np
 
 
 @dataclass(frozen=True)
@@ -39,9 +40,7 @@ class FunctionSelector:
         """Transforms data from torch.Tensor to list[int]"""
         return t[0].tolist()
 
-    def _name_score(
-        self, base_ids: list[int], name_ids: list[int]
-    ) -> float:
+    def _name_score(self, base_ids: list[int], name_ids: list[int]) -> float:
         """Score full candidate from token probabilities.
 
         Uses geometric mean so shorter function names do not auto-win.
@@ -59,7 +58,6 @@ class FunctionSelector:
             ids.append(tok)
         return score ** (1.0 / len(name_ids))
 
-    
     def select(self, user_prompt: str) -> Selection:
         prefix = self._prompter.function_name_prefix()
         prompt = self._prompter.build_selection_prompt(user_prompt)
@@ -82,10 +80,8 @@ class FunctionSelector:
             if score_sum > 0
             else [1.0 / len(scores) for _ in scores]
         )
-        best_ids = max(
-            range(len(probs)),
-            key=lambda i: (probs[i], scores[i]),
-        )
+
+        best_ids = int(np.argmax(probs))
         best_guess = Selection(
             name=self._functions[best_ids].name,
             confidence=float(probs[best_ids]),
@@ -94,6 +90,6 @@ class FunctionSelector:
         if best_guess.confidence < self._threshold:
             raise FunctionSelectorError(
                 f"Low selection confidence: {best_guess.confidence:.3f} < "
-                f"{self._threshold:.3f}"
+                f"{self._threshold:.3f} for candidate {best_guess.name}"
             )
         return best_guess

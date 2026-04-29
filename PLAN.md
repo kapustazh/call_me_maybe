@@ -5,11 +5,14 @@ todos:
   - id: parse-and-validate-inputs
     content: Create pydantic models for function definitions + prompt items; implement robust JSON loaders with clear errors.
     status: pending
-  - id: token-id-to-piece-map
-    content: Load tokenizer/vocab mapping via `Small_LLM_Model.get_path_to_tokenizer_file()` (fallback to vocab) so constraints can be applied per token.
+  - id: builtin-vocab-token-map
+    content: Build token ID helpers from the model's built-in vocab/tokenizer files and SDK decode behavior so constraints stay aligned with the model.
+    status: pending
+  - id: function-selection
+    content: Select functions with one LLM forward pass by scoring each function's distinguishing token at the prompt boundary and applying a confidence threshold.
     status: pending
   - id: constrained-decoder-core
-    content: Implement a JSON+schema state machine and a token-masking generation loop that guarantees valid, schema-compliant JSON for one result object.
+    content: Implement hybrid constrained decoding: force-inject JSON structure and use type-specific masked generation only for parameter values.
     status: pending
   - id: pipeline-loop-and-output
     content: Update `Pipeline.run()` to iterate prompts, generate one constrained-decoded result per prompt, validate types, and write a JSON array to `--output`.
@@ -29,7 +32,9 @@ todos:
 ## Repo reality check (current state)
 
 - Entry point exists: `src/__main__.py` parses `--functions_definition`, `--input`, `--output` and runs `Pipeline`.
-- `src/pipeline.py` currently just reads the whole input file as raw text and greedily generates 10 tokens. It doesn’t parse the input JSON array, doesn’t use function definitions, and doesn’t implement constrained decoding.
+- `src/pipeline.py` now loads validated prompt/function JSON, loops over prompts, selects a function, and writes result objects, but still emits empty `parameters`.
+- `src/function_selector.py` already contains an LLM-driven selector, but it currently scores complete function-name suffixes with multiple forward passes. It should be tightened to the single-boundary-logit design below.
+- `src/constrained_decoder.py` only has early token helper code. It still needs the hybrid value decoder.
 - The SDK you have is `llm_sdk.Small_LLM_Model` in `llm_sdk/llm_sdk/__init__.py` and exposes:
   - `encode(text) -> torch.Tensor`
   - `get_logits_from_input_ids(input_ids: list[int]) -> list[float]`
@@ -43,38 +48,74 @@ todos:
   - `function_calling_tests.json` → list of `PromptItem { prompt: str }`.
 - **For each prompt**:
   - Construct a *decision prompt* containing the user prompt + available functions (names + descriptions + parameter types).
-  - Run **constrained decoding** that can only emit JSON matching your required output object schema.
-  - Parse the generated JSON (it must parse every time), validate types against the chosen function definition, and collect results.
+  - Select the function with a single LLM forward pass over boundary logits.
+  - Build the result object with deterministic JSON structure: `prompt`, selected `name`, and generated `parameters`.
+  - Decode only parameter values with type-specific constrained generation.
+  - Validate types against the selected function definition and collect results.
 - **Write output** as JSON array to requested `--output` path.
 
-## Constrained decoding approach (practical, implementable)
+## Function selection
 
-Implement a token-level “masking” loop:
+Use LLM-driven function selection with one forward pass:
 
-- At each generation step:
-  - Ask the model for next-token logits with `get_logits_from_input_ids(context_ids)`.
-  - Compute a boolean mask of which token IDs are valid next tokens **given the partial output so far**.
-  - Set invalid tokens’ logits to negative infinity and pick argmax (or sample) from remaining.
+- Build a router prompt listing every function name, description, and parameter schema.
+- End the prompt exactly at the position where the distinguishing function token should appear.
+- Read logits with `get_logits_from_input_ids(context_ids)`.
+- For each candidate function, score the token that distinguishes it from the common prefix.
+- Apply softmax over candidate scores to get a confidence distribution.
+- Select the highest-scoring function only if confidence is at least `0.90`; otherwise raise a clear selection error.
 
-To make the mask computable, use a **streaming JSON + schema state machine** (not a full JSON-schema engine):
+Why this shape:
 
-- Hardcode the top-level object shape:
-  - Must generate: `{ "prompt": <string>, "name": <one_of_function_names>, "parameters": <object_for_that_function> }`
-- Drive generation with a deterministic state machine that knows:
-  - Which structural characters are expected next (`{`, `}`, `[`, `]`, `:`, `,`, quotes, whitespace).
-  - When it is inside a JSON string vs number.
-  - Which key is expected next.
-  - For `name`: only allow strings that match one of the function names exactly.
-  - For `parameters`: only allow the required keys for that function, with value types restricted by definition (`string`, `number`, `boolean`).
+- Avoids O(N) full-name scoring passes.
+- Keeps routing fast and deterministic for the small fixed function list.
+- Reuses the model where it is useful: semantic intent classification.
 
-Token-to-text mapping for constraints:
+## Constrained decoding approach
 
-- Use `Small_LLM_Model.get_path_to_tokenizer_file()` (preferred) or `get_path_to_vocab_file()` to build a mapping `token_id -> token_text_piece`.
-- A candidate token is valid if appending its text piece to the current generated text keeps the state machine in a non-error state (still a valid prefix).
+Use a hybrid decoder that guarantees valid JSON by construction:
+
+- **Structure**: force-inject braces, keys, quotes, colons, commas, and parameter key order. The LLM never gets to decide JSON syntax.
+- **Top-level object**: construct with Python data and `json.dumps`, using exactly `prompt`, `name`, and `parameters`.
+- **Parameters object**: derive required keys and value types from the selected `FunctionDefinition`.
+- **Values only**: use constrained LLM decoding only for the value slots.
+
+Type-specific value strategy:
+
+- **Strings**:
+  - Generate string content with quote-aware masking.
+  - Allow normal text tokens, escaped characters, and a closing quote only when the value is complete.
+  - Map generated strings to parameters by schema order for multi-parameter functions.
+- **Numbers**:
+  - Use logit masking over numeric token IDs (`0-9`, `.`, `-`) and parse the result.
+  - Keep only prefixes that can still become a valid JSON number.
+- **Booleans**:
+  - Score `true` and `false` autoregressively across all tokens, because either word may be multi-token.
+  - Pick the higher normalized log-probability.
 
 Stopping condition:
 
-- Stop only when the state machine reaches “completed JSON object” and the last token closes all structures.
+- Stop parameter value generation as soon as the value parser reaches a complete valid value for the expected type.
+- Never stop based on free-form model prose.
+
+## Vocab strategy
+
+Use the model's built-in vocabulary directly:
+
+- Load vocab assets from `Small_LLM_Model.get_path_to_vocab_file()` and reuse the existing `Vocab` helper where possible.
+- Use `Small_LLM_Model.decode([token_id])` to derive each token's text piece for masking checks.
+- Cache structural token IDs, numeric token IDs, quote IDs, `true`/`false` token sequences, and frequent punctuation at decoder init.
+- Use `Small_LLM_Model.encode()` for prompts and fixed literals so tokenization stays identical to the model.
+- Treat candidate token as valid only when its decoded text keeps the current value parser in a valid prefix state.
+
+## Design decisions
+
+1. **Force-injecting structure**: guarantees 100% JSON validity. Spontaneous LLM JSON is unreliable and can emit prose, missing braces, extra keys, or invalid escapes.
+2. **Single forward pass selection**: O(1) function scoring at the decision boundary instead of O(N) candidate generation passes.
+3. **Masked value decoding**: all parameter values come from model logits under type-specific masks.
+4. **Schema-order string mapping**: maps generated string values to multi-parameter function arguments by parameter order.
+5. **Precomputed token IDs**: caches structural, boolean, and numeric tokens once at init for speed and simpler masks.
+6. **Built-in vocab reuse**: avoids tokenizer drift and keeps constraints aligned with actual model tokenization.
 
 ## Files to add/modify
 
@@ -84,12 +125,13 @@ Stopping condition:
   - Validate and write output JSON array.
 - Modify `src/__main__.py`:
   - Align default `--output` with subject expectation (results file name) and improve error messages (no raw `print(f"{e=}")`).
-- Add new modules under `src/` (suggested):
+- Add/update modules under `src/`:
   - `src/models.py`: pydantic models: `FunctionDefinition`, `ParameterSpec`, `PromptItem`, `FunctionCallResult`.
   - `src/io_utils.py`: safe JSON read/write helpers (nice errors for missing/invalid JSON).
-  - `src/tokenizer_vocab.py`: load tokenizer/vocab files into `id -> piece` mapping.
-  - `src/constrained_decoder.py`: the state machine + masking loop.
-  - `src/prompting.py`: build the LLM instruction prompt (function list formatting, etc.).
+  - `src/vocab.py`: built-in vocab loader and token ID lookup helpers.
+  - `src/function_selector.py`: single-forward-pass boundary-logit function selector.
+  - `src/constrained_decoder.py`: force-injected JSON skeleton plus type-specific value generation.
+  - `src/prompt.py`: build selection and value-generation prompts.
 - Update `README.md` to meet the subject’s required sections (first italicized line, algorithm explanation, design decisions, performance analysis, challenges, testing strategy, usage examples, and resources + how AI was used).
 
 ## Validation & testing checklist (what to run locally)

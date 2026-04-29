@@ -2,6 +2,7 @@ from collections.abc import Sequence
 
 import numpy as np
 
+
 def softmax(x: Sequence[float]) -> list[float]:
     """Normalisation function for the vector"""
     if not x:
