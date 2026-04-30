@@ -1,9 +1,8 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any, cast
-
-from src.io_utils import load_json_file
 
 
 class Vocab:
@@ -12,7 +11,8 @@ class Vocab:
         path_to_vocab: str | Path,
         model: Any | None = None,
     ) -> None:
-        raw_vocab = load_json_file(path_to_vocab)
+        p = Path(path_to_vocab)
+        raw_vocab = json.loads(p.read_text(encoding="utf-8"))
         if not isinstance(raw_vocab, dict):
             raise ValueError("Vocab file must contain a JSON object")
         self.token_to_id = cast(dict[str, int], raw_vocab)

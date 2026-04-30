@@ -1,5 +1,6 @@
 from __future__ import annotations
-import llm_sdk
+from typing import Any
+
 from src.models import FunctionDefinition
 from src.vocab import Vocab
 
@@ -7,7 +8,7 @@ from src.vocab import Vocab
 class ConstrainedDecoder:
     def __init__(
         self,
-        model: llm_sdk.Small_LLM_Model,
+        model: Any,
         vocab: Vocab,
         functions: list[FunctionDefinition],
         max_new_tokens: int = 300,

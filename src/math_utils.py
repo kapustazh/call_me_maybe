@@ -1,4 +1,5 @@
 import numpy as np
+from typing import cast
 
 
 def softmax(x: list[float]) -> list[float]:
@@ -15,4 +16,4 @@ def softmax(x: list[float]) -> list[float]:
     # nonlinear amplifes distance between small and big values
     z = e.sum()
     # each single exp is being divided to the sum of the exp of the vector
-    return (e / z).tolist()
+    return cast(list[float], (e / z).tolist())

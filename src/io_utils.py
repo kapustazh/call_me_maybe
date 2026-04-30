@@ -2,13 +2,10 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, TypeVar
-
+from typing import Any, cast
 from pydantic import TypeAdapter, ValidationError
 
 from src.models import FunctionDefinition, FunctionResult, PromptItem
-
-T = TypeVar("T")
 
 
 class JsonFileError(ValueError):
@@ -47,8 +44,12 @@ def load_json_file(path: str | Path) -> Any:
         raise JsonFileError(msg) from exc
 
 
-def validate_json_data(data: Any, adapter: TypeAdapter[T], context: str) -> T:
-    """Validate decoded JSON using a TypeAdapter and return typed data."""
+def validate_json_data(
+    data: Any,
+    adapter: TypeAdapter[Any],
+    context: str,
+) -> Any:
+    """Validate decoded JSON using a TypeAdapter and return validated data."""
     try:
         return adapter.validate_python(data)
     except ValidationError as exc:
@@ -67,10 +68,13 @@ def load_function_definitions(path: str | Path) -> list[FunctionDefinition]:
     """Load and validate function definition list."""
     data = load_json_file(path)
     adapter = TypeAdapter(list[FunctionDefinition])
-    return validate_json_data(
-        data,
-        adapter,
-        f"function definitions file '{path}'",
+    return cast(
+        list[FunctionDefinition],
+        validate_json_data(
+            data,
+            adapter,
+            f"function definitions file '{path}'",
+        ),
     )
 
 
@@ -78,7 +82,10 @@ def load_prompt_items(path: str | Path) -> list[PromptItem]:
     """Load and validate prompt item list."""
     data = load_json_file(path)
     adapter = TypeAdapter(list[PromptItem])
-    return validate_json_data(data, adapter, f"prompt tests file '{path}'")
+    return cast(
+        list[PromptItem],
+        validate_json_data(data, adapter, f"prompt tests file '{path}'"),
+    )
 
 
 def write_text(path: str | Path, text: str) -> None:

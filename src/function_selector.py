@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import math
 
-from llm_sdk import Small_LLM_Model
+from typing import Any, cast
+
 from src.math_utils import softmax
 from src.models import FunctionDefinition
 from src.prompt import BobThePrompter
-import torch
 
 
 class FunctionSelectorError(Exception):
@@ -16,7 +16,7 @@ class FunctionSelectorError(Exception):
 class FunctionSelector:
     def __init__(
         self,
-        model: Small_LLM_Model,
+        model: Any,
         functions: list[FunctionDefinition],
         *,
         confidence_threshold: float = 0.90,
@@ -29,9 +29,9 @@ class FunctionSelector:
         self._prompter = BobThePrompter(functions)
 
     @staticmethod
-    def _to_ids(t: torch.Tensor) -> list[int]:
-        """Transforms data from torch.Tensor to list[int]"""
-        return t[0].tolist()
+    def _to_ids(t: Any) -> list[int]:
+        """Convert encoder output to list[int]."""
+        return cast(list[int], t[0].tolist())
 
     def _name_score(self, base_ids: list[int], name_ids: list[int]) -> float:
         """Return average log probability for a candidate function name."""
