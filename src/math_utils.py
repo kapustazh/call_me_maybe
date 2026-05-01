@@ -1,3 +1,9 @@
+from numpy._typing._array_like import NDArray
+
+
+from numpy import float64
+
+
 import numpy as np
 from typing import cast
 
@@ -6,9 +12,9 @@ def softmax(x: list[float]) -> list[float]:
     """Normalisation function for the vector"""
     if not x:
         return []
-    a = np.asarray(x, dtype=np.float64)
+    a: NDArray[float64] = np.asarray(x, dtype=np.float64)
     if np.isneginf(a).all():
-        n = len(a)
+        n: int = len(a)
         return [1.0 / n] * n  # all equal if all are -inf
     a = a - a.max()  # handles overflow for big exponent values
     # & normalisation | max values after extraction becomes 0

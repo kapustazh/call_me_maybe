@@ -4,11 +4,15 @@ version = "1.0.0"
 description = "Function calling tool that translates natural language prompts into structured function calls"
 requires-python = ">=3.10"
 dependencies = [
+    "basedpyright>=1.39.3",
     "llm-sdk",
     "numpy>=1.24.0",
     "pydantic>=2.0.0",
     "black>=26.1.0",
+    "flake8>=7.0.0",
+    "mypy>=1.10.0",
     "pytest>=8.0.0",
+    "basedpyright>=1.39.3",
 ]
 
 [tool.uv]
@@ -19,3 +23,7 @@ members = ["llm_sdk"]
 
 [tool.uv.sources]
 llm-sdk = { workspace = true }
+
+[tool.basedpyright]
+typeCheckingMode = "standard"
+include = ["src"]

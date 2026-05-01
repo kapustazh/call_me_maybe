@@ -15,66 +15,66 @@ Derived from [PLAN.md](PLAN.md). Check boxes as you go. Order matters inside eac
 
 ## M2 — Token id ↔ text (enables masking)
 
-- [ ] Add module (e.g. `src/tokenizer_vocab.py`) that loads `Small_LLM_Model.get_path_to_tokenizer_file()`; fallback to `get_path_to_vocab_file()` if needed.
-- [ ] Expose a stable API: e.g. `id_to_text(token_id: int) -> str` and/or batch map for all vocab indices used in masking.
-- [ ] Unit-smoke: a few known ids decode to expected pieces; handle edge ids (BOS/UNK if present).
-- [ ] Document any tokenizer quirks (BPE merges, leading space, partial UTF-8) that affect “append piece” validity.
+- [x] Add module (e.g. `src/tokenizer_vocab.py`) that loads `Small_LLM_Model.get_path_to_tokenizer_file()`; fallback to `get_path_to_vocab_file()` if needed.
+- [x] Expose a stable API: e.g. `id_to_text(token_id: int) -> str` and/or batch map for all vocab indices used in masking.
+- [x] Unit-smoke: a few known ids decode to expected pieces; handle edge ids (BOS/UNK if present).
+- [x] Document any tokenizer quirks (BPE merges, leading space, partial UTF-8) that affect “append piece” validity.
 
 ---
 
 ## M3 — Constrained decoder: JSON shell (structure only)
 
-- [ ] Define generation context: which prefix the model sees (system + user + functions text + `BobThePrompter` or final instruction prompt).
-- [ ] State machine: track partial output string, parse position, brace depth, `inside_string`, escape after `\`.
-- [ ] Enforce top-level object only: keys `prompt`, `name`, `parameters` in fixed order (or allowed order you choose, consistently).
-- [ ] Whitelist structural chars when machine expects `:` `,` `{` `}` string delimiters, etc.
-- [ ] Stopping: generation stops when machine reaches “closed root object, valid JSON”.
+- [x] Define generation context: which prefix the model sees (system + user + functions text + `BobThePrompter` or final instruction prompt).
+- [x] State machine: track partial output string, parse position, brace depth, `inside_string`, escape after `\`.
+- [x] Enforce top-level object only: keys `prompt`, `name`, `parameters` in fixed order (or allowed order you choose, consistently).
+- [x] Whitelist structural chars when machine expects `:` `,` `{` `}` string delimiters, etc.
+- [x] Stopping: generation stops when machine reaches “closed root object, valid JSON”.
 
 ---
 
 ## M4 — Constrained decoder: `name` and `parameters` schema
 
-- [ ] `name` value: only token sequences that concatenate to an **exact** function name from loaded definitions.
-- [ ] `prompt` value: JSON string; allow only valid string-prefix tokens; handle `\"`, `\\`, unicode escapes as needed.
-- [ ] `parameters` object: keys from chosen function’s `parameters` only; no extras.
-- [ ] Type masks per value: `string` / `number` / `integer` / `boolean` / `object` (match your `FunctionParameter` literals).
-- [ ] `object` value: if you only support empty `{}` for now, document it; else recursive structure.
+- [x] `name` value: only token sequences that concatenate to an **exact** function name from loaded definitions.
+- [x] `prompt` value: JSON string; allow only valid string-prefix tokens; handle `\"`, `\\`, unicode escapes as needed.
+- [x] `parameters` object: keys from chosen function’s `parameters` only; no extras.
+- [x] Type masks per value: `string` / `number` / `integer` / `boolean` / `object` (match your `FunctionParameter` literals).
+- [x] `object` value: if you only support empty `{}` for now, document it; else recursive structure.
 
 ---
 
 ## M5 — Masking loop (wire to model)
 
-- [ ] In `constrained_decoder.py` (or split): for each step, `get_logits_from_input_ids(context_ids)`.
-- [ ] For each `token_id`, get piece string; if append keeps state machine valid, keep logit; else set `-inf`.
-- [ ] Argmax (or sample) among allowed tokens; append chosen id; extend context; repeat until stop.
-- [ ] `max_new_tokens` safety cap; on failure, clear error (don’t write invalid JSON).
+- [x] In `constrained_decoder.py` (or split): for each step, `get_logits_from_input_ids(context_ids)`.
+- [x] For each `token_id`, get piece string; if append keeps state machine valid, keep logit; else set `-inf`.
+- [x] Argmax (or sample) among allowed tokens; append chosen id; extend context; repeat until stop.
+- [x] `max_new_tokens` safety cap; on failure, clear error (don’t write invalid JSON).
 
 ---
 
 ## M6 — Pipeline: replace ad-hoc path with spec output
 
-- [ ] In `Pipeline.run()`: for each `PromptItem`, run constrained generator once; build `FunctionResult` (or list of dicts matching schema).
-- [ ] **Remove or gate** the current “test harness” (`model_guess` / `selection_prompt` dump) for final submission, or keep behind a dev-only flag.
-- [ ] After generation: `json.loads` + validate with pydantic (or your adapter) for each result.
-- [ ] `write_json` full array to `--output` path.
+- [x] In `Pipeline.run()`: for each `PromptItem`, run constrained generator once; build `FunctionResult` (or list of dicts matching schema).
+- [x] **Remove or gate** the current “test harness” (`model_guess` / `selection_prompt` dump) for final submission, or keep behind a dev-only flag.
+- [x] After generation: `json.loads` + validate with pydantic (or your adapter) for each result.
+- [x] `write_json` full array to `--output` path.
 
 ---
 
 ## M7 — Quality, errors, and performance
 
-- [ ] Input missing / bad JSON: raise `JsonFileError` / `JsonValidationError` with good messages; CLI prints message, not raw `f"{e=}"`.
-- [ ] Parameter fill: ensure numbers/strings are correctly escaped and unambiguous (quotes in user text).
-- [ ] No hardcoded function names: always from `functions_definition.json`.
-- [ ] Measure runtime on `function_calling_tests.json`; ensure under ~5 minutes (PLAN).
-- [ ] `make install` and `make lint` clean (flake8 + mypy if in Makefile).
+- [x] Input missing / bad JSON: raise `JsonFileError` / `JsonValidationError` with good messages; CLI prints message, not raw `f"{e=}"`.
+- [x] Parameter fill: ensure numbers/strings are correctly escaped and unambiguous (quotes in user text).
+- [x] No hardcoded function names: always from `functions_definition.json`.
+- [x] Measure runtime on `function_calling_tests.json`; ensure under ~5 minutes (PLAN).
+- [x] `make install` and `make lint` clean (flake8 + mypy if in Makefile).
 
 ---
 
 ## M8 — Documentation (subject checklist)
 
-- [ ] README: first italicized line, algorithm, design decisions, performance, challenges, testing strategy, usage examples.
-- [ ] Resources + how you used AI (if required by subject).
-- [ ] `PLAN.md` frontmatter: set todo statuses to match reality, or point readers to this file for execution detail.
+- [x] README: first italicized line, algorithm, design decisions, performance, challenges, testing strategy, usage examples.
+- [x] Resources + how you used AI (if required by subject).
+- [x] `PLAN.md` frontmatter: set todo statuses to match reality, or point readers to this file for execution detail.
 
 ---
 

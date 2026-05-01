@@ -1,11 +1,14 @@
 import argparse
-from argparse import Namespace
+from argparse import ArgumentParser, Namespace
 
+from src.function_selector import FunctionSelectorError
+from src.io_utils import JsonFileError, JsonValidationError
+from src.json_literal_validators import ConstrainedDecodingError
 from src.pipeline import Pipeline
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(
+    parser: ArgumentParser = argparse.ArgumentParser(
         prog="call_me_maybe",
         description="Translates prompts into function calls",
     )
@@ -35,8 +38,15 @@ def main() -> None:
             args.output,
         )
         pipeline.run()
-    except Exception as exc:
+    except (
+        JsonFileError,
+        JsonValidationError,
+        FunctionSelectorError,
+        ConstrainedDecodingError,
+        ValueError,
+    ) as exc:
         print(f"Error: {exc}")
+        raise SystemExit(1) from exc
 
 
 if __name__ == "__main__":

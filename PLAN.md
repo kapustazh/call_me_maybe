@@ -4,22 +4,22 @@ overview: Implement a function-calling pipeline that reads prompts + function de
 todos:
   - id: parse-and-validate-inputs
     content: Create pydantic models for function definitions + prompt items; implement robust JSON loaders with clear errors.
-    status: pending
+    status: done
   - id: builtin-vocab-token-map
     content: Build token ID helpers from the model's built-in vocab/tokenizer files and SDK decode behavior so constraints stay aligned with the model.
-    status: pending
+    status: done
   - id: function-selection
     content: Select functions with one LLM forward pass by scoring each function's distinguishing token at the prompt boundary and applying a confidence threshold.
-    status: pending
+    status: done
   - id: constrained-decoder-core
     content: Implement hybrid constrained decoding: force-inject JSON structure and use type-specific masked generation only for parameter values.
-    status: pending
+    status: done
   - id: pipeline-loop-and-output
     content: Update `Pipeline.run()` to iterate prompts, generate one constrained-decoded result per prompt, validate types, and write a JSON array to `--output`.
-    status: pending
+    status: done
   - id: cli-and-docs
     content: Align CLI defaults with subject, improve error messages, and rewrite README to satisfy mandatory sections (incl. constrained decoding explanation).
-    status: pending
+    status: done
 ---
 
 ## What the project must do
@@ -150,4 +150,3 @@ Use the model's built-in vocabulary directly:
 - Don’t hardcode function names/parameters: always derive from `functions_definition.json`.
 - Don’t output extra keys, comments, or prose.
 - Keep runtime under ~5 minutes for the test set.
-

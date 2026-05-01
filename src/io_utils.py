@@ -58,12 +58,6 @@ def validate_json_data(
         ) from exc
 
 
-def validate_json_file(path: str | Path) -> bool:
-    """Return True if file exists and contains syntactically valid JSON."""
-    _ = load_json_file(path)
-    return True
-
-
 def load_function_definitions(path: str | Path) -> list[FunctionDefinition]:
     """Load and validate function definition list."""
     data = load_json_file(path)

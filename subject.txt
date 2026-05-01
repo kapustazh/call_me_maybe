@@ -451,6 +451,22 @@ call me maybe Introduction to function calling in LLMs
 Your README must be written in English.
 17
 Chapter VII
+Bonus Part
+Check for bonus features (optional, not required for passing):
+• Support for multiple LLM models beyond Qwen/Qwen3-0.6B
+• Recoding the tokenizer: avoiding direct use of encode and decode in the main code,
+instead using get_logits_from_input_ids and get_path_to_vocabulary_json
+• Advanced error recovery mechanisms
+• Performance optimizations (caching, batching)
+• Comprehensive test suite
+• Visualization of the generation process
+• Support for complex nested function arguments
+• Public implementation of tokenizer encode and optional decode methods
+• Demonstration of how encoding and decoding integrate with constrained decoding
+Bonus features must be implemented and working — not just described in the README.md.
+You may be asked to demonstrate them during evaluation.
+18
+Chapter VIII
 Submission and peer review
 Submit your assignment in your Git repository as usual. Only the work inside your
 repository will be reviewed during the defense. Don’t hesitate to double-check the names
@@ -472,9 +488,9 @@ This step is meant to verify your actual understanding of a specific part of the
 The modification can be performed in any development environment you choose (e.g.,
 your usual setup), and it should be feasible within a few minutes — unless a specific time
 frame is defined as part of the evaluation.
-18
+19
 call me maybe Introduction to function calling in LLMs
 You can, for example, be asked to make a small update to a function or script, modify a
 display, or adjust a data structure to store new information, etc.
 The details (scope, target, etc.) will be specified in the evaluation guidelines and may
-vary from one evaluation to another for the same project.
+vary from one evaluation to another for the same project

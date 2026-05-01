@@ -2,9 +2,6 @@
 # ABOUTME: Provides Small_LLM_Model class for loading and running causal
 # language models.
 
-# import time
-# from typing import Tuple
-
 import torch
 from transformers import (
     AutoModelForCausalLM,
@@ -94,7 +91,7 @@ class Small_LLM_Model:
         ids = self._tokenizer.encode(text, add_special_tokens=False)
         return torch.tensor([ids], device=self._device, dtype=torch.long)
 
-    def decode(self, ids: torch.Tensor | list[int]) -> str:
+    def decode(self, ids: object) -> str:
         """Inverse of :py:meth:`encode`. Removes special tokens."""
         if isinstance(ids, torch.Tensor):
             ids = ids.tolist()

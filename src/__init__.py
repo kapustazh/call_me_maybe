@@ -1,12 +1,12 @@
 import os
 from pathlib import Path
 
-_root = Path(__file__).resolve().parent.parent
+_root: Path = Path(__file__).resolve().parent.parent
 
 os.environ.setdefault("UV_CACHE_DIR", str(_root / ".uv-cache"))
 os.environ.setdefault("TMPDIR", str(_root / ".tmp"))
 
-_hf_root = _root / ".hf"
+_hf_root: Path = _root / ".hf"
 os.environ.setdefault("HF_HOME", str(_hf_root))
 os.environ.setdefault("TRANSFORMERS_CACHE", str(_hf_root / "transformers"))
 os.environ.setdefault("HUGGINGFACE_HUB_CACHE", str(_hf_root / "hub"))
