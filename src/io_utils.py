@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 from pydantic import TypeAdapter, ValidationError
 
 from src.models import FunctionDefinition, FunctionResult, PromptItem
@@ -44,42 +44,26 @@ def load_json_file(path: str | Path) -> Any:
         raise JsonFileError(msg) from exc
 
 
-def validate_json_data(
-    data: Any,
-    adapter: TypeAdapter[Any],
-    context: str,
-) -> Any:
-    """Validate decoded JSON using a TypeAdapter and return validated data."""
-    try:
-        return adapter.validate_python(data)
-    except ValidationError as exc:
-        raise JsonValidationError(
-            f"Schema validation failed for {context}: {exc}"
-        ) from exc
-
-
 def load_function_definitions(path: str | Path) -> list[FunctionDefinition]:
     """Load and validate function definition list."""
     data = load_json_file(path)
-    adapter = TypeAdapter(list[FunctionDefinition])
-    return cast(
-        list[FunctionDefinition],
-        validate_json_data(
-            data,
-            adapter,
-            f"function definitions file '{path}'",
-        ),
-    )
+    try:
+        return TypeAdapter(list[FunctionDefinition]).validate_python(data)
+    except ValidationError as exc:
+        raise JsonValidationError(
+            f"Schema validation failed for function definitions file '{path}': {exc}"
+        ) from exc
 
 
 def load_prompt_items(path: str | Path) -> list[PromptItem]:
     """Load and validate prompt item list."""
     data = load_json_file(path)
-    adapter = TypeAdapter(list[PromptItem])
-    return cast(
-        list[PromptItem],
-        validate_json_data(data, adapter, f"prompt tests file '{path}'"),
-    )
+    try:
+        return TypeAdapter(list[PromptItem]).validate_python(data)
+    except ValidationError as exc:
+        raise JsonValidationError(
+            f"Schema validation failed for prompt tests file '{path}': {exc}"
+        ) from exc
 
 
 def write_text(path: str | Path, text: str) -> None:

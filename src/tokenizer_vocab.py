@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Mapping
 
 from src.io_utils import load_json_file
@@ -22,32 +21,28 @@ class TokenizerVocab:
         if not token_to_id:
             raise TokenizerVocabError("Tokenizer vocab is empty")
 
-        self._token_to_id: dict[str, int] = {
-            str(token): int(token_id)
+        self._id_to_token: dict[int, str] = {
+            int(token_id): str(token)
             for token, token_id in token_to_id.items()
         }
-        self._id_to_token: dict[int, str] = {
-            token_id: token for token, token_id in self._token_to_id.items()
-        }
-        self._model = model
+        self._model: LLMModelProtocol | None = model
 
     @classmethod
     def from_model(cls, model: LLMModelProtocol) -> "TokenizerVocab":
-        tokenizer_path = Path(model.get_path_to_tokenizer_file())
         try:
-            token_map = _read_token_map(
-                tokenizer_path,
+            token_map: dict[str, int] = _read_token_map(
+                path=model.get_path_to_tokenizer_file(),
                 from_tokenizer_file=True,
             )
             return cls(token_map, model)
         except ValueError:
             # Some model packages only ship a flat vocab file.
+            # it will crush later
             pass
 
-        vocab_path = Path(model.get_path_to_vocab_file())
         try:
             token_map = _read_token_map(
-                vocab_path,
+                path=model.get_path_to_vocab_file(),
                 from_tokenizer_file=False,
             )
         except ValueError as exc:
@@ -57,25 +52,24 @@ class TokenizerVocab:
         return cls(token_map, model)
 
     def id_to_text(self, token_id: int) -> str | None:
-        raw_token = self._id_to_token.get(token_id)
+        raw_token: str | None = self._id_to_token.get(token_id)
         if raw_token is None:
             return None
         if self._model is None:
             return raw_token
-        return str(self._model.decode([token_id]))
+        return str(self._model.decode(ids=[token_id]))
 
     def id_to_text_map(self) -> dict[int, str]:
         out: dict[int, str] = {}
         for token_id in sorted(self._id_to_token):
-            text = self.id_to_text(token_id)
+            text: str | None = self.id_to_text(token_id)
             if text is not None:
                 out[token_id] = text
         return out
 
 
-# TODO: review tommorow
 def _read_token_map(
-    path: Path,
+    path: str,
     *,
     from_tokenizer_file: bool,
 ) -> dict[str, int]:
