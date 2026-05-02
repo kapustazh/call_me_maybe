@@ -5,27 +5,28 @@ import numpy as np
 from src.json_literal_validators import (
     BooleanValidator,
     ConstrainedDecodingError,
+    EmptyObjectValidator,
     LiteralValidator,
     NumberValidator,
-    ObjectValidator,
     StringValidator,
 )
-from src.model_protocol import LLMModelProtocol
+from src.model_protocol import LLMModelProtocolAdapter
 from src.model_utils import encoded_to_token_ids
 from src.models import FunctionDefinition
 from src.prompt import BobThePrompter
 from src.tokenizer_vocab import TokenizerVocab
+import math
 
 
 class ConstrainedDecoder:
     def __init__(
         self,
-        model: LLMModelProtocol,
+        model: LLMModelProtocolAdapter,
         tokenizer_vocab: TokenizerVocab,
         functions: list[FunctionDefinition],
         max_new_tokens: int = 120,
     ) -> None:
-        self._model: LLMModelProtocol = model
+        self._model: LLMModelProtocolAdapter = model
         self._max_new_tokens: int = max_new_tokens
         self._max_string_literal_length: int = max_new_tokens
         self._prompter: BobThePrompter = BobThePrompter(functions)
@@ -36,7 +37,7 @@ class ConstrainedDecoder:
             "number": NumberValidator(integer_only=False),
             "integer": NumberValidator(integer_only=True),
             "boolean": BooleanValidator(),
-            "object": ObjectValidator(),
+            "object": EmptyObjectValidator(),
         }
         self._candidate_pool_by_type: dict[str, tuple[int, ...]] = {
             value_type: self._collect_pool(validator)
@@ -170,7 +171,7 @@ class ConstrainedDecoder:
     @staticmethod
     def _select_best_token(logits: list[float], allowed_ids: list[int]) -> int:
         best_id = -1
-        best_logit = float("-inf")
+        best_logit = -math.inf
         for token_id in allowed_ids:
             if token_id >= len(logits):
                 continue

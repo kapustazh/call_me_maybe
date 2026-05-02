@@ -3,12 +3,12 @@ from __future__ import annotations
 from typing import Any
 
 
-# TODO: i think is overkill but keep for now
 def encoded_to_token_ids(encoded: object) -> list[int]:
-    """Normalize model.encode output to list[int]."""
+    """Normalize model.encode output to list[int] for one prompt."""
     raw: Any
-    if hasattr(encoded, "tolist"):
-        raw = getattr(encoded, "tolist")()
+    tolist = getattr(encoded, "tolist", None)
+    if callable(tolist):
+        raw = tolist()
     else:
         raw = encoded
 
@@ -19,6 +19,8 @@ def encoded_to_token_ids(encoded: object) -> list[int]:
         raise TypeError("model.encode() returned unsupported type")
 
     if raw and isinstance(raw[0], list):
+        if len(raw) != 1:
+            raise TypeError("model.encode() must return one batch row")
         nested = raw[0]
         if not isinstance(nested, list):
             raise TypeError("model.encode() nested output is not a list")

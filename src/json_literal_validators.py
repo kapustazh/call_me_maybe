@@ -34,9 +34,7 @@ class BooleanValidator:
         )
 
     def is_valid_prefix(self, text: str) -> bool:
-        return text == "" or any(
-            literal.startswith(text) for literal in self._literals
-        )
+        return text == "" or any(literal.startswith(text) for literal in self._literals)
 
     def is_complete(self, text: str) -> bool:
         return text in self._literals
@@ -44,13 +42,11 @@ class BooleanValidator:
     def parse_value(self, text: str) -> object:
         value = json.loads(text)
         if not isinstance(value, bool):
-            raise ConstrainedDecodingError(
-                f"Expected boolean JSON value, got: {text}"
-            )
+            raise ConstrainedDecodingError(f"Expected boolean JSON value, got: {text}")
         return value
 
 
-class ObjectValidator:
+class EmptyObjectValidator:
     _valid_prefixes = ("", "{", "{}")
 
     def allows_token_piece(self, piece: str) -> bool:
@@ -67,9 +63,7 @@ class ObjectValidator:
     def parse_value(self, text: str) -> object:
         value = json.loads(text)
         if not isinstance(value, dict):
-            raise ConstrainedDecodingError(
-                f"Expected object JSON value, got: {text}"
-            )
+            raise ConstrainedDecodingError(f"Expected object JSON value, got: {text}")
         if value:
             raise ConstrainedDecodingError(
                 "Object parameter currently supports only empty '{}'"
@@ -112,9 +106,7 @@ class NumberValidator:
     def parse_value(self, text: str) -> object:
         value = json.loads(text)
         if isinstance(value, bool):
-            raise ConstrainedDecodingError(
-                f"Expected numeric JSON value, got: {text}"
-            )
+            raise ConstrainedDecodingError(f"Expected numeric JSON value, got: {text}")
         if self._integer_only:
             if not isinstance(value, int):
                 raise ConstrainedDecodingError(
@@ -122,9 +114,7 @@ class NumberValidator:
                 )
             return value
         if not isinstance(value, (int, float)):
-            raise ConstrainedDecodingError(
-                f"Expected number JSON value, got: {text}"
-            )
+            raise ConstrainedDecodingError(f"Expected number JSON value, got: {text}")
         return value
 
 
@@ -139,6 +129,8 @@ class StringValidator:
         return True
 
     def is_valid_prefix(self, text: str) -> bool:
+        if _string_has_disallowed_jsonish_opening(text):
+            return False
         valid, _ = _scan_string_literal_prefix(text)
         return valid
 
@@ -149,13 +141,10 @@ class StringValidator:
     def parse_value(self, text: str) -> object:
         value = json.loads(text)
         if not isinstance(value, str):
-            raise ConstrainedDecodingError(
-                f"Expected string JSON value, got: {text}"
-            )
+            raise ConstrainedDecodingError(f"Expected string JSON value, got: {text}")
         return value
 
 
-# TODO: review tommorow
 def _scan_number_prefix(
     text: str,
     *,
@@ -167,84 +156,14 @@ def _scan_number_prefix(
 
     state = "start"
     for char in text:
-        if state == "start":
-            if char == "-":
-                state = "sign"
-            elif char == "0":
-                state = "int_zero"
-            elif char in "123456789":
-                state = "int"
-            else:
-                return False, False
-            continue
-
-        if state == "sign":
-            if char == "0":
-                state = "int_zero"
-            elif char in "123456789":
-                state = "int"
-            else:
-                return False, False
-            continue
-
-        if state == "int_zero":
-            if allow_fraction and char == ".":
-                state = "dot"
-            elif allow_exponent and char in "eE":
-                state = "exp_mark"
-            else:
-                return False, False
-            continue
-
-        if state == "int":
-            if char in string.digits:
-                state = "int"
-            elif allow_fraction and char == ".":
-                state = "dot"
-            elif allow_exponent and char in "eE":
-                state = "exp_mark"
-            else:
-                return False, False
-            continue
-
-        if state == "dot":
-            if char in string.digits:
-                state = "frac"
-            else:
-                return False, False
-            continue
-
-        if state == "frac":
-            if char in string.digits:
-                state = "frac"
-            elif allow_exponent and char in "eE":
-                state = "exp_mark"
-            else:
-                return False, False
-            continue
-
-        if state == "exp_mark":
-            if char in "+-":
-                state = "exp_sign"
-            elif char in string.digits:
-                state = "exp"
-            else:
-                return False, False
-            continue
-
-        if state == "exp_sign":
-            if char in string.digits:
-                state = "exp"
-            else:
-                return False, False
-            continue
-
-        if state == "exp":
-            if char in string.digits:
-                state = "exp"
-            else:
-                return False, False
-            continue
+        state = _next_number_state(
+            state,
+            char,
+            allow_fraction=allow_fraction,
+            allow_exponent=allow_exponent,
+        )
+        if state is None:
+            return False, False
 
     complete_states = {"int_zero", "int"}
     if allow_fraction:
@@ -252,6 +171,61 @@ def _scan_number_prefix(
     if allow_exponent:
         complete_states.add("exp")
     return True, state in complete_states
+
+
+def _next_number_state(
+    state: str,
+    char: str,
+    *,
+    allow_fraction: bool,
+    allow_exponent: bool,
+) -> str | None:
+    if state in {"start", "sign"}:
+        return _number_start_state(char, allow_sign=state == "start")
+    if state in {"int_zero", "int", "frac"}:
+        return _number_body_state(
+            state,
+            char,
+            allow_fraction=allow_fraction,
+            allow_exponent=allow_exponent,
+        )
+    if state in {"dot", "exp_sign", "exp"}:
+        return (
+            "frac"
+            if state == "dot" and char in string.digits
+            else ("exp" if state != "dot" and char in string.digits else None)
+        )
+    if state == "exp_mark":
+        if char in "+-":
+            return "exp_sign"
+        return "exp" if char in string.digits else None
+    return None
+
+
+def _number_start_state(char: str, *, allow_sign: bool) -> str | None:
+    if allow_sign and char == "-":
+        return "sign"
+    if char == "0":
+        return "int_zero"
+    if char in "123456789":
+        return "int"
+    return None
+
+
+def _number_body_state(
+    state: str,
+    char: str,
+    *,
+    allow_fraction: bool,
+    allow_exponent: bool,
+) -> str | None:
+    if state != "int_zero" and char in string.digits:
+        return state
+    if state in {"int_zero", "int"} and allow_fraction and char == ".":
+        return "dot"
+    if allow_exponent and char in "eE":
+        return "exp_mark"
+    return None
 
 
 def _scan_string_literal_prefix(text: str) -> tuple[bool, bool]:
@@ -266,14 +240,14 @@ def _scan_string_literal_prefix(text: str) -> tuple[bool, bool]:
     while index < len(text):
         char = text[index]
         if unicode_digits_left > 0:
-            if char not in string.hexdigits:
+            if not _is_hex_digit(char):
                 return False, False
             unicode_digits_left -= 1
             index += 1
             continue
         if escaped:
             escaped = False
-            if char in '"\\/bfnrt':
+            if _is_simple_escape(char):
                 index += 1
                 continue
             if char == "u":
@@ -285,9 +259,47 @@ def _scan_string_literal_prefix(text: str) -> tuple[bool, bool]:
             escaped = True
             index += 1
             continue
-        if char == '"':
+        if _is_closing_quote(char):
             return index == len(text) - 1, True
-        if ord(char) < 32:
+        if _is_control_char(char):
             return False, False
         index += 1
     return True, False
+
+
+def _string_has_disallowed_jsonish_opening(text: str) -> bool:
+    """Reject strings that look like nested JSON or common bad tool-style opens.
+
+    - ``"{`` / ``"  {`` — model nests objects inside string params.
+    - ``">{`` / ``"> `` — after blocking ``"{``, argmax often lands here and
+      closes early as junk (e.g. ``">{ "``).
+
+    Still allows ``"[...`` (regex), ``">="``, and building ``">"`` (content ``>``).
+    """
+    if not text.startswith('"'):
+        return False
+    inner = text[1:]
+    if not inner:
+        return False
+    stripped = inner.lstrip()
+    if stripped.startswith("{"):
+        return True
+    if len(stripped) >= 2 and stripped[0] == ">":
+        return stripped[1] == "{" or stripped[1].isspace()
+    return False
+
+
+def _is_hex_digit(char: str) -> bool:
+    return char in string.hexdigits
+
+
+def _is_simple_escape(char: str) -> bool:
+    return char in '"\\/bfnrt'
+
+
+def _is_closing_quote(char: str) -> bool:
+    return char == '"'
+
+
+def _is_control_char(char: str) -> bool:
+    return ord(char) < 32

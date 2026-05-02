@@ -12,7 +12,7 @@ from src.io_utils import (
 )
 from src.json_literal_validators import ConstrainedDecodingError
 from src.models import FunctionResult
-from src.model_protocol import LLMModelProtocol
+from src.model_protocol import LLMModelProtocolAdapter
 from src.tokenizer_vocab import TokenizerVocab
 
 
@@ -23,8 +23,8 @@ class Pipeline:
         input_path: str,
         output_path: str,
         model: str = "",
-        selection_confidence_threshold: float = 0.90,
-        model_factory: Callable[[str], LLMModelProtocol] | None = None,
+        selection_confidence_threshold: float = 0.55,
+        model_factory: Callable[[str], LLMModelProtocolAdapter] | None = None,
     ) -> None:
         self.functions_path: str = functions_path
         self.input_path: str = input_path
@@ -61,9 +61,7 @@ class Pipeline:
                 selected_name = selector.select(item.prompt)
                 function_definition = function_by_name.get(selected_name)
                 if function_definition is None:
-                    raise ValueError(
-                        f"Selected unknown function name: {selected_name}"
-                    )
+                    raise ValueError(f"Selected unknown function name: {selected_name}")
                 parameters = decoder.decode_parameters(
                     item.prompt,
                     function_definition,
@@ -83,8 +81,7 @@ class Pipeline:
 
         write_function_results(self.output_path, out)
 
-    # TODO: i think is overkill but keep for now
-    def _build_model(self) -> LLMModelProtocol:
+    def _build_model(self) -> LLMModelProtocolAdapter:
         if self._model_factory is not None:
             return self._model_factory(self._model_name)
 
@@ -92,7 +89,7 @@ class Pipeline:
 
         if self._model_name:
             return cast(
-                LLMModelProtocol,
+                LLMModelProtocolAdapter,
                 Small_LLM_Model(model_name=self._model_name),
             )
-        return cast(LLMModelProtocol, Small_LLM_Model())
+        return cast(LLMModelProtocolAdapter, Small_LLM_Model())

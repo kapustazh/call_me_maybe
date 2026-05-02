@@ -51,7 +51,8 @@ def load_function_definitions(path: str | Path) -> list[FunctionDefinition]:
         return TypeAdapter(list[FunctionDefinition]).validate_python(data)
     except ValidationError as exc:
         raise JsonValidationError(
-            f"Schema validation failed for function definitions file '{path}': {exc}"
+            f"Schema validation failed for function definitions file '{path}':"
+            f" {exc}"
         ) from exc
 
 

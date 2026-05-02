@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Mapping
 
 from src.io_utils import load_json_file
-from src.model_protocol import LLMModelProtocol
+from src.model_protocol import LLMModelProtocolAdapter
 
 
 class TokenizerVocabError(ValueError):
@@ -16,29 +16,28 @@ class TokenizerVocab:
     def __init__(
         self,
         token_to_id: Mapping[str, int],
-        model: LLMModelProtocol | None = None,
+        model: LLMModelProtocolAdapter | None = None,
     ) -> None:
         if not token_to_id:
             raise TokenizerVocabError("Tokenizer vocab is empty")
 
         self._id_to_token: dict[int, str] = {
-            int(token_id): str(token)
-            for token, token_id in token_to_id.items()
+            int(token_id): str(token) for token, token_id in token_to_id.items()
         }
-        self._model: LLMModelProtocol | None = model
+        self._model: LLMModelProtocolAdapter | None = model
 
     @classmethod
-    def from_model(cls, model: LLMModelProtocol) -> "TokenizerVocab":
+    def from_model(cls, model: LLMModelProtocolAdapter) -> "TokenizerVocab":
+        tokenizer_error: ValueError | None = None
         try:
             token_map: dict[str, int] = _read_token_map(
                 path=model.get_path_to_tokenizer_file(),
                 from_tokenizer_file=True,
             )
             return cls(token_map, model)
-        except ValueError:
+        except ValueError as exc:
             # Some model packages only ship a flat vocab file.
-            # it will crush later
-            pass
+            tokenizer_error = exc
 
         try:
             token_map = _read_token_map(
@@ -48,7 +47,7 @@ class TokenizerVocab:
         except ValueError as exc:
             raise TokenizerVocabError(
                 "Cannot load tokenizer_file or vocab_file for token map"
-            ) from exc
+            ) from (tokenizer_error or exc)
         return cls(token_map, model)
 
     def id_to_text(self, token_id: int) -> str | None:

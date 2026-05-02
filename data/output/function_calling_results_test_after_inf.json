@@ -1,0 +1,43 @@
+[
+  {
+    "prompt": "What is the square root of 16?",
+    "name": "fn_get_square_root",
+    "parameters": {
+      "a": 16
+    }
+  },
+  {
+    "prompt": "Calculate the square root of 144",
+    "name": "fn_get_square_root",
+    "parameters": {
+      "a": 144
+    }
+  },
+  {
+    "prompt": "Replace all numbers in \"Hello 34 I'm 233 years old\" with NUMBERS",
+    "name": "fn_substitute_string_with_regex",
+    "parameters": {
+      "source_string": "{\"json\": \"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"",
+      "regex": "{\"json\": \"34233\"}",
+      "replacement": "{\"json\": \"34233\"}"
+    }
+  },
+  {
+    "prompt": "Replace all vowels in 'Programming is fun' with asterisks",
+    "name": "fn_substitute_string_with_regex",
+    "parameters": {
+      "source_string": "{\"fn_substituted\": \"*\"} for the 'fn_substituted' key, and the 'fn_substituted' key's 'substituted' key is the new '",
+      "regex": "{\"fn_substituted\": \"*\"} for the 'fn_substituted' key, and the 'fn_substituted' key's 'substituted' key is the new str",
+      "replacement": "{\"fn_substitu...\"} for the 'fn_substitu...'"
+    }
+  },
+  {
+    "prompt": "Substitute the word 'cat' with 'dog' in 'The cat sat on the mat with another cat'",
+    "name": "fn_substitute_string_with_regex",
+    "parameters": {
+      "source_string": "{\"fn_substituted\": \"dog\"} for the 'substituted' key in the 'substituted' key of the 'substituted' key of the 'substit",
+      "regex": "{\"fn_substituted\": \"dog\"} for the 'dog' in the 'cat' in the 'mat' in the 'mat' in the 'cat' in the 'mat' in the 'cat",
+      "replacement": "{\"fn_substituted\": \"dog\"} for the 'dog' in the 'cat' in the 'mat' in the 'mat' in the 'mat' in the 'mat' in the 'mat"
+    }
+  }
+]

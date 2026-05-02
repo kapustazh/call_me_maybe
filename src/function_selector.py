@@ -6,7 +6,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 import numpy as np
 
-from src.model_protocol import LLMModelProtocol
+from src.model_protocol import LLMModelProtocolAdapter
 from src.model_utils import encoded_to_token_ids
 from src.math_utils import softmax
 from src.models import FunctionDefinition
@@ -27,14 +27,14 @@ class _FunctionCandidate:
 class FunctionSelector:
     def __init__(
         self,
-        model: LLMModelProtocol,
+        model: LLMModelProtocolAdapter,
         functions: list[FunctionDefinition],
         *,
         confidence_threshold: float = 0.90,
     ) -> None:
         if not functions:
             raise ValueError("No functions provided for selection")
-        self._model: LLMModelProtocol = model
+        self._model: LLMModelProtocolAdapter = model
         self._functions: list[FunctionDefinition] = functions
         self._threshold: float = confidence_threshold
         self._prompter: BobThePrompter = BobThePrompter(functions)
@@ -186,7 +186,7 @@ class FunctionSelector:
     ) -> int | None:
         if not lexical_scores:
             return None
-        best_index = int(np.argmax(lexical_scores))
+        best_index: int = int(np.argmax(lexical_scores))
         best_score = lexical_scores[best_index]
         if best_score <= 0:
             return None

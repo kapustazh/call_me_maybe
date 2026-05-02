@@ -4,7 +4,7 @@ from typing import Protocol, runtime_checkable
 
 
 @runtime_checkable
-class LLMModelProtocol(Protocol):
+class LLMModelProtocolAdapter(Protocol):
     def encode(self, text: str) -> object: ...
 
     def decode(self, ids: object) -> str: ...
