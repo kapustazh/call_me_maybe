@@ -11,7 +11,7 @@ from src.math_utils import softmax
 from src.models import FunctionDefinition
 from src.prompt import BobThePrompter
 
-_UNIFORM_MULTIPLIER = 4.5
+_UNIFORM_MULTIPLIER = 3.0
 
 
 class FunctionSelectorError(Exception):
