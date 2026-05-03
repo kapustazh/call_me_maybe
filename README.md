@@ -1,77 +1,99 @@
-*Constrained function-calling pipeline that converts natural language prompts
-into schema-valid JSON results.*
+*This project has been created as part of the 42 curriculum by mnestere.*
 
 # call_me_maybe
 
-`call_me_maybe` reads prompt tests and function definitions, selects best
-function per prompt, constrained-decodes parameter values, and writes final
-results with exact shape:
+Small-model **function calling**: read prompts and a function schema (JSON),
+pick a function with the LM under a confidence gate, extract typed parameters
+with constrained decoding plus light heuristics where helpful, write one JSON
+array of results:
 
 ```json
 {
   "prompt": "...",
-  "name": "fn_name",
-  "parameters": {}
+  "name": "fn_example",
+  "parameters": { "...": "..." }
 }
 ```
 
-## Algorithm
+Rows that fail selection or decoding are skipped (message on stderr); the output
+file lists only successful calls.
 
-1. Load and validate input JSON files with pydantic.
-2. Build selection prompt from available function definitions.
-3. Run boundary-logit function selection with confidence threshold.
-4. For selected function, decode each parameter with type-aware token masks.
-5. Validate decoded values against JSON type expectations.
-6. Emit one result object per prompt and write one JSON array file.
+## Description
 
-## Design decisions
+Goal is reliable structured output from a ~0.6B causal LM (`Qwen/Qwen3-0.6B` by
+default via `llm_sdk`), not free-form JSON from the model alone. The pipeline
+loads inputs with **Pydantic**, runs **logit-masked** literal generation per
+parameter type, and prints **per-prompt progress** on stdout while it runs.
 
-- **Constrained decoding for values:** avoids malformed JSON literals.
-- **Schema-driven parameter loop:** no hardcoded function names or keys.
-- **Tokenizer-file first, vocab fallback:** stays aligned to model tokenization.
-- **Single pipeline path:** clean separation of IO, selection, and decoding.
+## Instructions
 
-## Performance notes
-
-- Selection uses one boundary-logit pass, with continuation rescoring only on
-  first-token collisions.
-- Decoder precomputes candidate token pools per JSON type.
-- `max_new_tokens` bounds each parameter decode step for safety.
-
-## Challenges
-
-- Handling partial JSON string escapes and unicode escape prefixes.
-- Number-prefix validation where many prefixes are syntactically valid.
-- Keeping strict typing (`mypy --strict`) while integrating dynamic SDK model.
-
-## Testing strategy
-
-- Unit tests for tokenizer/vocab loading and fallback behavior.
-- Unit tests for selector confidence handling.
-- Unit tests for constrained parameter decoding into typed Python values.
-
-Run checks:
+**Prerequisites:** Python ≥ 3.10, [uv](https://github.com/astral-sh/uv), enough
+disk/RAM for the HF checkpoint (first run downloads weights).
 
 ```bash
-make lint-strict
+make install    # uv sync, Python 3.11 in this repo
+make run        # default paths under data/input → data/output
 make test
+make lint       # flake8 + mypy (non-strict)
+# optional: make lint-strict
 ```
 
-## Usage
+**CLI** (same flags as `uv run -m src …`):
 
-Default paths:
+| Flag | Default |
+|------|---------|
+| `--functions_definition` | `data/input/functions_definition.json` |
+| `--input` | `data/input/function_calling_tests.json` |
+| `--output` | `data/output/function_calling_results.json` |
+
+Use a **matching** definitions file for your prompt set (e.g. extended tests
+under `data_test/` need `data_test/input/functions_definition.json`), or
+selection sees the wrong tool list.
 
 ```bash
-make run
+make run ARGS='--functions_definition data_test/input/functions_definition.json \
+  --input data_test/input/function_calling_tests.json \
+  --output data_test/output/function_calling_results.json'
 ```
 
-Custom paths:
+**Programmatic model:** `Pipeline(..., model_name="HF/model-id")` passes the
+id to `Small_LLM_Model`; empty string keeps the SDK default. The CLI does not
+expose `--model` yet.
 
-```bash
-make run ARGS="--functions_definition data/input/functions_definition.json \
---input data/input/function_calling_tests.json \
---output data/output/function_calling_results.json"
-```
+## Algorithm (short)
+
+1. Validate JSON inputs; **deduplicate** function definitions by `name` (first
+   wins) so softmax over candidates is not split by duplicates.
+2. **Selection prompt** lists tools; suffix is the **longest common prefix** of
+   all function names (character LCP), so prompt ending and token suffix for
+   scoring stay aligned. Softmax over per-candidate boundary logits with a
+   **minimum probability** threshold (`DEFAULT_SELECTION_CONFIDENCE` in
+   `function_selector.py`); continuation logits break first-token ties.
+3. For the chosen function, each parameter: **heuristic extraction** when
+   pattern matches, else **masked autoregressive** decode of one JSON literal,
+   then `json.loads` into Python types per schema.
+
+## Design choices
+
+- **Constrained decoding** for literals → syntactically valid JSON fragments.
+- **Schema-driven loop** over `parameters` — no per-function hardcoded keys in
+  the decoder core.
+- **Tokenizer JSON first**, flat vocab fallback (`TokenizerVocab`) so masks
+  match the loaded model.
+- **Heuristics** only as fast path / fallback for obvious patterns (numbers,
+  quoted strings, etc.); routing stays LLM-based.
+
+## Performance and reliability
+
+- One forward per selection step at the boundary; extra forwards only for
+  tied first tokens (shared BPE prefix).
+- Candidate token **pools per JSON type** built once at decoder init.
+- Bounded `max_new_tokens` per literal decode.
+
+## Testing
+
+- `tests /` — tokenizer/vocab, selector, decoder, pipeline (including golden
+  output with a fake model where applicable).
 
 ## Resources
 
@@ -85,5 +107,4 @@ make run ARGS="--functions_definition data/input/functions_definition.json \
 
 ## AI usage
 
-AI assistant used for implementation scaffolding, type-safety cleanup, and unit
-test drafting. All code and behavior reviewed and adjusted in-repo.
+AI assistant was used for everything (besides this part of the README and "Resources")

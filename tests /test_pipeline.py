@@ -1,7 +1,10 @@
 import json
 from pathlib import Path
 
+import pytest
+
 from src.pipeline import Pipeline
+from src.prompt import Prefix
 
 
 class FakePipelineModel:
@@ -20,10 +23,22 @@ class FakePipelineModel:
     def get_logits_from_input_ids(self, input_ids: list[int]) -> list[float]:
         text = "".join(chr(token_id) for token_id in input_ids)
         if "JSON literal:" not in text:
-            return [0.0] * 256
+            logits = [-100.0] * 256
+            has_user = "User request:\n" in text
+            has_fn_list = "\n\nAvailable functions:\n" in text
+            if has_user and has_fn_list:
+                user_part = text.split("User request:\n", 1)[1].split(
+                    "\n\nAvailable functions:\n",
+                    1,
+                )[0]
+                if "sum" in user_part.lower():
+                    logits[ord("a")] = 10.0
+                    logits[ord("g")] = 1.0
+            return logits
         marker = "JSON literal:"
         marker_pos = text.rfind(marker)
-        generated = "" if marker_pos < 0 else text[marker_pos + len(marker) :]
+        end_marker = marker_pos + len(marker)
+        generated = "" if marker_pos < 0 else text[end_marker:]
         if "Function name: fn_add_numbers" in text:
             if "Parameter: a" in text:
                 target = "2"
@@ -47,7 +62,89 @@ class FakePipelineModel:
         return str(self._vocab_path)
 
 
-def test_pipeline_skips_invalid_prompts(tmp_path: Path) -> None:
+class GoldenPipelineModel:
+    def __init__(
+        self,
+        tokenizer_path: Path,
+        vocab_path: Path,
+        expected: list[dict[str, object]],
+    ) -> None:
+        self._tokenizer_path = tokenizer_path
+        self._vocab_path = vocab_path
+        self._expected_by_prompt = {
+            str(item["prompt"]): item for item in expected
+        }
+        self._name_prefix = Prefix.longest_common_prefix(
+            [str(item["name"]) for item in expected],
+        )
+
+    def encode(self, text: str) -> list[list[int]]:
+        return [[ord(ch) for ch in text]]
+
+    def decode(self, ids: list[int] | object) -> str:
+        if isinstance(ids, list):
+            return "".join(chr(token_id) for token_id in ids)
+        raise TypeError("Expected list[int]")
+
+    def get_logits_from_input_ids(self, input_ids: list[int]) -> list[float]:
+        text = "".join(chr(token_id) for token_id in input_ids)
+        if "JSON literal:" in text:
+            target = self._parameter_target(text)
+            generated = self._generated_parameter_suffix(text)
+        else:
+            target = self._selection_target(text)
+            generated = self._generated_selection_suffix(text)
+        next_char = (
+            target[len(generated)] if len(generated) < len(target) else " "
+        )
+        logits = [-1000.0] * 256
+        logits[ord(next_char)] = 1000.0
+        return logits
+
+    def get_path_to_tokenizer_file(self) -> str:
+        return str(self._tokenizer_path)
+
+    def get_path_to_vocab_file(self) -> str:
+        return str(self._vocab_path)
+
+    def _selection_target(self, text: str) -> str:
+        prompt = _between(text, "User request:\n", "\n\nAvailable functions:")
+        item = self._expected_by_prompt[prompt]
+        full = str(item["name"])
+        skip = len(self._name_prefix)
+        return full[skip:]
+
+    def _parameter_target(self, text: str) -> str:
+        prompt = _between(text, "User prompt:\n", "\n\nFunction name:")
+        parameter_name = _between(text, "Parameter: ", "\nExpected JSON type:")
+        parameters = self._expected_by_prompt[prompt]["parameters"]
+        if not isinstance(parameters, dict):
+            raise TypeError("Expected parameter mapping")
+        return json.dumps(parameters[parameter_name])
+
+    @staticmethod
+    def _generated_parameter_suffix(text: str) -> str:
+        return text.rsplit("JSON literal:", 1)[1]
+
+    def _generated_selection_suffix(self, text: str) -> str:
+        marker = "Return only function name.\n"
+        if marker not in text:
+            return ""
+        tail = text.split(marker, 1)[1]
+        if not tail.startswith(self._name_prefix):
+            return ""
+        skip = len(self._name_prefix)
+        return tail[skip:]
+
+
+def _between(text: str, start: str, end: str) -> str:
+    return text.split(start, 1)[1].split(end, 1)[0]
+
+
+def test_pipeline_drops_invalid_prompt_results(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     functions_path = tmp_path / "functions.json"
     input_path = tmp_path / "input.json"
     output_path = tmp_path / "output.json"
@@ -97,11 +194,15 @@ def test_pipeline_skips_invalid_prompts(tmp_path: Path) -> None:
     )
     vocab_path.write_text(json.dumps(token_map), encoding="utf-8")
 
+    def _fake_model(*_a: object, **_k: object) -> FakePipelineModel:
+        return FakePipelineModel(tokenizer_path, vocab_path)
+
+    monkeypatch.setattr("src.pipeline.Small_LLM_Model", _fake_model)
     pipeline = Pipeline(
         str(functions_path),
         str(input_path),
         str(output_path),
-        model_factory=lambda _: FakePipelineModel(tokenizer_path, vocab_path),
+        selection_confidence_threshold=0.80,
     )
     pipeline.run()
 
@@ -113,3 +214,42 @@ def test_pipeline_skips_invalid_prompts(tmp_path: Path) -> None:
             "parameters": {"a": 2.0, "b": 3.0},
         }
     ]
+
+
+def test_pipeline_matches_results_golden_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    functions_path = repo_root / "data/input/functions_definition.json"
+    input_path = repo_root / "data/input/function_calling_tests.json"
+    expected_path = repo_root / "data/output/function_calling_results.json"
+    output_path = tmp_path / "output.json"
+    tokenizer_path = tmp_path / "tokenizer.json"
+    vocab_path = tmp_path / "vocab.json"
+
+    expected = json.loads(expected_path.read_text(encoding="utf-8"))
+    token_map = {chr(code): code for code in range(32, 127)}
+    tokenizer_path.write_text(
+        json.dumps({"model": {"vocab": token_map}}),
+        encoding="utf-8",
+    )
+    vocab_path.write_text(json.dumps(token_map), encoding="utf-8")
+
+    def _fake_model(*_a: object, **_k: object) -> GoldenPipelineModel:
+        return GoldenPipelineModel(
+            tokenizer_path,
+            vocab_path,
+            expected,
+        )
+
+    monkeypatch.setattr("src.pipeline.Small_LLM_Model", _fake_model)
+    pipeline = Pipeline(
+        str(functions_path),
+        str(input_path),
+        str(output_path),
+    )
+    pipeline.run()
+
+    out = json.loads(output_path.read_text(encoding="utf-8"))
+    assert out == expected

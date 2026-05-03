@@ -1,9 +1,7 @@
 import argparse
 from argparse import ArgumentParser, Namespace
 
-from src.function_selector import FunctionSelectorError
 from src.io_utils import JsonFileError, JsonValidationError
-from src.json_literal_validators import ConstrainedDecodingError
 from src.pipeline import Pipeline
 
 
@@ -41,8 +39,6 @@ def main() -> None:
     except (
         JsonFileError,
         JsonValidationError,
-        FunctionSelectorError,
-        ConstrainedDecodingError,
         ValueError,
     ) as exc:
         print(f"Error: {exc}")

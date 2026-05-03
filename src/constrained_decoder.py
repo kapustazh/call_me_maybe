@@ -1,16 +1,18 @@
 from __future__ import annotations
 
-import numpy as np
+import math
+import re
+
+from llm_sdk import Small_LLM_Model  # type: ignore
 
 from src.json_literal_validators import (
     BooleanValidator,
     ConstrainedDecodingError,
+    EmptyObjectValidator,
     LiteralValidator,
     NumberValidator,
-    ObjectValidator,
     StringValidator,
 )
-from src.model_protocol import LLMModelProtocol
 from src.model_utils import encoded_to_token_ids
 from src.models import FunctionDefinition
 from src.prompt import BobThePrompter
@@ -18,16 +20,17 @@ from src.tokenizer_vocab import TokenizerVocab
 
 
 class ConstrainedDecoder:
+    _DEFAULT_MAX_NEW_TOKENS = 120
+
     def __init__(
         self,
-        model: LLMModelProtocol,
+        model: Small_LLM_Model,
         tokenizer_vocab: TokenizerVocab,
         functions: list[FunctionDefinition],
-        max_new_tokens: int = 120,
+        max_new_tokens: int = _DEFAULT_MAX_NEW_TOKENS,
     ) -> None:
-        self._model: LLMModelProtocol = model
+        self._model: Small_LLM_Model = model
         self._max_new_tokens: int = max_new_tokens
-        self._max_string_literal_length: int = max_new_tokens
         self._prompter: BobThePrompter = BobThePrompter(functions)
         self._piece_by_id: dict[int, str] = tokenizer_vocab.id_to_text_map()
 
@@ -36,7 +39,7 @@ class ConstrainedDecoder:
             "number": NumberValidator(integer_only=False),
             "integer": NumberValidator(integer_only=True),
             "boolean": BooleanValidator(),
-            "object": ObjectValidator(),
+            "object": EmptyObjectValidator(),
         }
         self._candidate_pool_by_type: dict[str, tuple[int, ...]] = {
             value_type: self._collect_pool(validator)
@@ -49,9 +52,37 @@ class ConstrainedDecoder:
         function_definition: FunctionDefinition,
     ) -> dict[str, object]:
         out: dict[str, object] = {}
-        for parameter_name in function_definition.parameters:
-            parameter_spec = function_definition.parameters[parameter_name]
+        numeric_param_names = [
+            name
+            for name, spec in function_definition.parameters.items()
+            if spec.type in {"number", "integer"}
+        ]
+        for (
+            parameter_name,
+            parameter_spec,
+        ) in function_definition.parameters.items():
             parameter_type = parameter_spec.type
+
+            if parameter_type == "string":
+                fallback = self._prompt_string_fallback(
+                    user_prompt=user_prompt,
+                    parameter_name=parameter_name,
+                )
+                if fallback is not None:
+                    out[parameter_name] = fallback
+                    continue
+
+            if parameter_type in {"number", "integer"}:
+                fallback_number = self._prompt_number_fallback(
+                    user_prompt=user_prompt,
+                    parameter_name=parameter_name,
+                    numeric_param_names=numeric_param_names,
+                    integer_only=(parameter_type == "integer"),
+                )
+                if fallback_number is not None:
+                    out[parameter_name] = fallback_number
+                    continue
+
             prompt = self._prompter.build_parameter_prompt(
                 user_prompt,
                 function_definition,
@@ -63,7 +94,8 @@ class ConstrainedDecoder:
                 parameter_name=parameter_name,
             )
             validator = self._validators[parameter_type]
-            out[parameter_name] = validator.parse_value(raw_literal)
+            parsed_value = validator.parse_value(raw_literal)
+            out[parameter_name] = parsed_value
         return out
 
     def _decode_literal(
@@ -100,14 +132,15 @@ class ConstrainedDecoder:
             piece: str = self._piece_by_id[token_id]
             generated_text += piece
 
-            if validator.is_complete(generated_text) and self._should_stop(
-                context_ids=context_ids,
-                generated_ids=generated_ids,
-                generated_text=generated_text,
-                candidate_pool=candidate_pool,
-                validator=validator,
-            ):
-                return generated_text
+            if validator.is_complete(generated_text):
+                if self._should_stop(
+                    context_ids=context_ids,
+                    generated_ids=generated_ids,
+                    generated_text=generated_text,
+                    candidate_pool=candidate_pool,
+                    validator=validator,
+                ):
+                    return generated_text
 
             forced_literal: str | None = self._force_complete_string(
                 value_type=value_type,
@@ -129,28 +162,6 @@ class ConstrainedDecoder:
             f"'{parameter_name}' ({value_type})"
         )
 
-    def _should_stop(
-        self,
-        *,
-        context_ids: list[int],
-        generated_ids: list[int],
-        generated_text: str,
-        candidate_pool: tuple[int, ...],
-        validator: LiteralValidator,
-    ) -> bool:
-        next_logits = self._model.get_logits_from_input_ids(
-            context_ids + generated_ids
-        )
-        next_allowed = self._allowed_ids(
-            generated_text,
-            candidate_pool,
-            validator,
-        )
-        if not next_allowed:
-            return True
-        best_next = int(np.argmax(next_logits))
-        return best_next not in next_allowed
-
     def _allowed_ids(
         self,
         current_text: str,
@@ -167,10 +178,32 @@ class ConstrainedDecoder:
                 allowed.append(token_id)
         return allowed
 
+    def _should_stop(
+        self,
+        *,
+        context_ids: list[int],
+        generated_ids: list[int],
+        generated_text: str,
+        candidate_pool: tuple[int, ...],
+        validator: LiteralValidator,
+    ) -> bool:
+        next_allowed = self._allowed_ids(
+            generated_text,
+            candidate_pool,
+            validator,
+        )
+        if not next_allowed:
+            return True
+        next_logits = self._model.get_logits_from_input_ids(
+            context_ids + generated_ids
+        )
+        best_next = max(range(len(next_logits)), key=next_logits.__getitem__)
+        return best_next not in next_allowed
+
     @staticmethod
     def _select_best_token(logits: list[float], allowed_ids: list[int]) -> int:
         best_id = -1
-        best_logit = float("-inf")
+        best_logit = -math.inf
         for token_id in allowed_ids:
             if token_id >= len(logits):
                 continue
@@ -202,9 +235,204 @@ class ConstrainedDecoder:
     ) -> str | None:
         if value_type != "string":
             return None
-        if len(generated_text) < self._max_string_literal_length:
+        if len(generated_text) < self._max_new_tokens:
             return None
         candidate = generated_text + '"'
         if validator.is_complete(candidate):
             return candidate
         return None
+
+    @staticmethod
+    def _extract_quoted_values(user_prompt: str) -> list[str]:
+        quoted = re.findall(r"'([^']*)'|\"([^\"]+)\"", user_prompt)
+        return [
+            single or double for single, double in quoted if single or double
+        ]
+
+    def _prompt_string_fallback(
+        self,
+        *,
+        user_prompt: str,
+        parameter_name: str,
+    ) -> str | None:
+        values = self._extract_quoted_values(user_prompt)
+        lower_prompt = user_prompt.lower()
+        lower_param = parameter_name.lower()
+
+        if "regex" in lower_param:
+            if "numbers" in lower_prompt or "digits" in lower_prompt:
+                return r"\d+"
+            if "vowels" in lower_prompt:
+                return "[AEIOUaeiou]"
+            word_match = re.search(
+                r"\bword\s+['\"]([^'\"]+)['\"]",
+                user_prompt,
+                flags=re.IGNORECASE,
+            )
+            if word_match:
+                return word_match.group(1)
+            if values:
+                return values[0]
+            return None
+
+        if lower_param in {"s", "source_string"}:
+            if values:
+                return max(values, key=len)
+            return None
+
+        if lower_param == "replacement":
+            quoted_with = re.search(
+                r"\bwith\s+['\"]([^'\"]+)['\"]",
+                user_prompt,
+                flags=re.IGNORECASE,
+            )
+            if quoted_with:
+                return quoted_with.group(1)
+            plain_with = re.findall(
+                r"\bwith\s+([A-Za-z*#._-]+)\b",
+                user_prompt,
+                flags=re.IGNORECASE,
+            )
+            if plain_with:
+                token: str = str(plain_with[-1])
+                if token.lower() in {"asterisk", "asterisks", "star", "stars"}:
+                    return "*"
+                return token
+            if len(values) >= 2:
+                return values[1]
+            if values:
+                return values[0]
+            return None
+
+        if lower_param == "name":
+            with_match = re.search(
+                r"\bwith\s+([A-Za-z][A-Za-z0-9_-]*)",
+                user_prompt,
+                flags=re.IGNORECASE,
+            )
+            if with_match:
+                return with_match.group(1)
+            name_match = re.match(
+                r"(?:greet|say\s+hello\s+to|welcome)\s+(.+?)"
+                r"(?:\s*[.!?]?\s*$)",
+                user_prompt,
+                re.IGNORECASE,
+            )
+            if name_match:
+                return name_match.group(1).strip()
+            tokens = re.findall(r"[A-Za-z][A-Za-z0-9_-]*", user_prompt)
+            if tokens:
+                return str(tokens[-1])
+            return None
+
+        if lower_param == "template":
+            colon_match = re.search(r":\s*(.+)$", user_prompt)
+            if colon_match:
+                return colon_match.group(1).strip()
+            return None
+
+        if lower_param == "query":
+            if values:
+                return values[0]
+            return None
+
+        if lower_param == "database":
+            db_match = re.search(
+                r"\b(?:on\s+(?:the\s+)?)(\w+)\s+database\b",
+                user_prompt,
+                re.IGNORECASE,
+            )
+            if db_match:
+                return db_match.group(1)
+            return None
+
+        if lower_param == "path":
+            path_match = re.search(
+                r"([A-Za-z]:\\[^\s]+|/[^\s]+\.\w+)",
+                user_prompt,
+            )
+            if path_match:
+                return path_match.group(1)
+            return None
+
+        if lower_param == "encoding":
+            enc_match = re.search(
+                r"(\S*\w+-\d\w*|\w+\d\S*)\s+encoding\b",
+                user_prompt,
+                re.IGNORECASE,
+            )
+            if enc_match:
+                return enc_match.group(1)
+            enc_match = re.search(
+                r"\bencoding\s+(\S+)",
+                user_prompt,
+                re.IGNORECASE,
+            )
+            if enc_match:
+                return enc_match.group(1)
+            return None
+
+        if values:
+            return values[0]
+        return None
+
+    _DIGIT_NUMBER_RE = re.compile(r"[+-]?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?")
+    _WORD_NUMBERS: dict[str, str] = {
+        "zero": "0",
+        "one": "1",
+        "two": "2",
+        "three": "3",
+        "four": "4",
+        "five": "5",
+        "six": "6",
+        "seven": "7",
+        "eight": "8",
+        "nine": "9",
+        "ten": "10",
+        "eleven": "11",
+        "twelve": "12",
+    }
+    _WORD_NUMBER_RE = re.compile(
+        r"\b(" + "|".join(_WORD_NUMBERS) + r")\b",
+        re.IGNORECASE,
+    )
+
+    @classmethod
+    def _extract_numbers_from_prompt(cls, user_prompt: str) -> list[str]:
+        """Extract digit-based and word-based numbers in prompt order."""
+        hits: list[tuple[int, str]] = []
+        for m in cls._DIGIT_NUMBER_RE.finditer(user_prompt):
+            hits.append((m.start(), m.group()))
+        for m in cls._WORD_NUMBER_RE.finditer(user_prompt):
+            hits.append((m.start(), cls._WORD_NUMBERS[m.group().lower()]))
+        hits.sort(key=lambda h: h[0])
+        return [v for _, v in hits]
+
+    @classmethod
+    def _prompt_number_fallback(
+        cls,
+        *,
+        user_prompt: str,
+        parameter_name: str,
+        numeric_param_names: list[str],
+        integer_only: bool,
+    ) -> int | float | None:
+        matches = cls._extract_numbers_from_prompt(user_prompt)
+        if not matches:
+            return None
+        try:
+            param_index = numeric_param_names.index(parameter_name)
+        except ValueError:
+            return None
+        if param_index >= len(matches):
+            return None
+        value_text = matches[param_index]
+        if integer_only:
+            try:
+                return int(float(value_text))
+            except ValueError:
+                return None
+        try:
+            return float(value_text)
+        except ValueError:
+            return None

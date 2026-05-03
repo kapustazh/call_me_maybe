@@ -1,19 +1,41 @@
 from __future__ import annotations
 
-from collections.abc import Callable
-from typing import cast
+import json
+import sys
+import time
+from typing import Any
+
+from llm_sdk import Small_LLM_Model  # type: ignore
 
 from src.constrained_decoder import ConstrainedDecoder
-from src.function_selector import FunctionSelector, FunctionSelectorError
+from src.function_selector import (
+    DEFAULT_SELECTION_CONFIDENCE,
+    FunctionSelector,
+    FunctionSelectorError,
+)
 from src.io_utils import (
     load_function_definitions,
     load_prompt_items,
     write_function_results,
 )
 from src.json_literal_validators import ConstrainedDecodingError
-from src.models import FunctionResult
-from src.model_protocol import LLMModelProtocol
+from src.models import FunctionDefinition, FunctionResult
 from src.tokenizer_vocab import TokenizerVocab
+
+_WRIER_DELAY = 0.03
+
+
+def _write_char_by_char(text: str, *, delay: float = _WRIER_DELAY) -> None:
+    """Write text char-by-char to stdout for visual feedback."""
+    for c in text:
+        sys.stdout.write(c)
+        sys.stdout.flush()
+        time.sleep(delay)
+
+
+def _format_params(parameters: dict[str, Any]) -> str:
+    """Compact JSON repr of parameters for display."""
+    return json.dumps(parameters, ensure_ascii=False)
 
 
 class Pipeline:
@@ -22,27 +44,41 @@ class Pipeline:
         functions_path: str,
         input_path: str,
         output_path: str,
-        model: str = "",
-        selection_confidence_threshold: float = 0.90,
-        model_factory: Callable[[str], LLMModelProtocol] | None = None,
+        model_name: str = "",
+        selection_confidence_threshold: float = DEFAULT_SELECTION_CONFIDENCE,
     ) -> None:
         self.functions_path: str = functions_path
         self.input_path: str = input_path
         self.output_path: str = output_path
-        self._model_name: str = model
+        self._model_name: str = model_name
         self._selection_confidence_threshold = selection_confidence_threshold
-        self._model_factory = model_factory
+
+    @staticmethod
+    def _deduplicate_definitions(
+        definitions: list[FunctionDefinition],
+    ) -> list[FunctionDefinition]:
+        """Keep first occurrence of each function name."""
+        seen: set[str] = set()
+        unique: list[FunctionDefinition] = []
+        for fd in definitions:
+            if fd.name not in seen:
+                seen.add(fd.name)
+                unique.append(fd)
+        return unique
 
     def run(self) -> None:
-        """Build one function-call result per prompt."""
+        """Build function-call results and skip invalid prompts."""
         prompt_items = load_prompt_items(self.input_path)
-        function_definitions = load_function_definitions(self.functions_path)
-        function_by_name = {
-            function_definition.name: function_definition
-            for function_definition in function_definitions
-        }
+        function_definitions = self._deduplicate_definitions(
+            load_function_definitions(self.functions_path)
+        )
+        function_by_name = {fd.name: fd for fd in function_definitions}
 
-        model = self._build_model()
+        model = (
+            Small_LLM_Model(self._model_name)
+            if self._model_name.strip()
+            else Small_LLM_Model()
+        )
         tokenizer_vocab = TokenizerVocab.from_model(model)
         selector = FunctionSelector(
             model,
@@ -55,8 +91,11 @@ class Pipeline:
             function_definitions,
         )
 
+        total = len(prompt_items)
         out: list[FunctionResult] = []
-        for item in prompt_items:
+        skipped_count: int = 0
+        for idx, item in enumerate(prompt_items, 1):
+            _write_char_by_char(f"[{idx}/{total}] Processing: {item.prompt}\n")
             try:
                 selected_name = selector.select(item.prompt)
                 function_definition = function_by_name.get(selected_name)
@@ -74,25 +113,31 @@ class Pipeline:
                     parameters=parameters,
                 )
                 out.append(result)
+                _write_char_by_char(
+                    f"  \u2192 {selected_name}"  # arrow symbol
+                    f"({_format_params(result.parameters)})\n",
+                )
             except (
                 FunctionSelectorError,
                 ConstrainedDecodingError,
                 ValueError,
-            ):
+            ) as exc:
+                print(
+                    f"  \u2717 Skipped: {exc}", file=sys.stderr
+                )  # cross symbol
+                skipped_count += 1
                 continue
 
         write_function_results(self.output_path, out)
-
-    # TODO: i think is overkill but keep for now
-    def _build_model(self) -> LLMModelProtocol:
-        if self._model_factory is not None:
-            return self._model_factory(self._model_name)
-
-        from llm_sdk import Small_LLM_Model  # type: ignore
-
-        if self._model_name:
-            return cast(
-                LLMModelProtocol,
-                Small_LLM_Model(model_name=self._model_name),
+        print(
+            f"\nDone. {len(out)}/{total} results written"
+            f" to {self.output_path}",
+        )
+        if skipped_count:
+            print(
+                (
+                    f"Skipped {skipped_count} prompt(s) due to "
+                    "routing/decoding errors"
+                ),
+                file=sys.stderr,
             )
-        return cast(LLMModelProtocol, Small_LLM_Model())

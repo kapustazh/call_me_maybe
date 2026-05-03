@@ -1,3 +1,7 @@
+from typing import cast
+
+from llm_sdk import Small_LLM_Model  # type: ignore
+
 from src.function_selector import FunctionSelector, FunctionSelectorError
 from src.models import FunctionDefinition, FunctionParameter
 
@@ -60,7 +64,7 @@ def _definitions() -> list[FunctionDefinition]:
 
 def test_selects_best_name() -> None:
     selector = FunctionSelector(
-        FakeSelectorModel(mode="sum"),
+        cast(Small_LLM_Model, FakeSelectorModel(mode="sum")),
         _definitions(),
         confidence_threshold=0.60,
     )
@@ -70,7 +74,7 @@ def test_selects_best_name() -> None:
 
 def test_raises_on_low_confidence() -> None:
     selector = FunctionSelector(
-        FakeSelectorModel(mode="ambiguous"),
+        cast(Small_LLM_Model, FakeSelectorModel(mode="ambiguous")),
         _definitions(),
         confidence_threshold=0.90,
     )
@@ -82,11 +86,11 @@ def test_raises_on_low_confidence() -> None:
         raise AssertionError("Expected FunctionSelectorError")
 
 
-def test_lexical_winner_overrides_model_bias() -> None:
+def test_model_selection_when_logits_favor_add() -> None:
     selector = FunctionSelector(
-        FakeSelectorModel(mode="biased_add"),
+        cast(Small_LLM_Model, FakeSelectorModel(mode="biased_add")),
         _definitions(),
-        confidence_threshold=0.90,
+        confidence_threshold=0.60,
     )
     selected = selector.select("Greet john")
-    assert selected == "fn_greet"
+    assert selected == "fn_add_numbers"
