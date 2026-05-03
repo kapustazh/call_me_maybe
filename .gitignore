@@ -211,3 +211,7 @@ __marimo__/
 .tmp/
 .hf
 example
+
+# Output files
+data/output/
+data_test/output/

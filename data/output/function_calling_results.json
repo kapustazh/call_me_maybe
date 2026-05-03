@@ -1,18 +1,9 @@
 [
   {
-    "prompt": "What is the sum of 2 and 3?",
-    "name": "fn_add_numbers",
-    "parameters": {
-      "a": 2.0,
-      "b": 3.0
-    }
-  },
-  {
     "prompt": "What is the sum of 265 and 345?",
-    "name": "fn_add_numbers",
+    "name": "fn_greet",
     "parameters": {
-      "a": 265.0,
-      "b": 345.0
+      "name": "and"
     }
   },
   {
@@ -31,16 +22,20 @@
   },
   {
     "prompt": "Reverse the string 'hello'",
-    "name": "fn_reverse_string",
+    "name": "fn_substitute_string_with_regex",
     "parameters": {
-      "s": "hello"
+      "source_string": "hello",
+      "regex": "hello",
+      "replacement": "hello"
     }
   },
   {
     "prompt": "Reverse the string 'world'",
-    "name": "fn_reverse_string",
+    "name": "fn_substitute_string_with_regex",
     "parameters": {
-      "s": "world"
+      "source_string": "world",
+      "regex": "world",
+      "replacement": "world"
     }
   },
   {
@@ -59,11 +54,10 @@
   },
   {
     "prompt": "Replace all numbers in \"Hello 34 I'm 233 years old\" with NUMBERS",
-    "name": "fn_substitute_string_with_regex",
+    "name": "fn_add_numbers",
     "parameters": {
-      "source_string": "Hello 34 I'm 233 years old",
-      "regex": "\\d+",
-      "replacement": "NUMBERS"
+      "a": 34.0,
+      "b": 233.0
     }
   },
   {

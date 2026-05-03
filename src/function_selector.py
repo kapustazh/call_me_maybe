@@ -11,8 +11,10 @@ from src.math_utils import softmax
 from src.models import FunctionDefinition
 from src.prompt import BobThePrompter
 
-# Default selection confidence used across pipeline and selector
-DEFAULT_SELECTION_CONFIDENCE = 0.40
+# Softmax margin gate: skip when best candidate prob below this (near uniform).
+# Depends on the count of candidates.
+# Higher count => lower threshold => more candidates considered.
+DEFAULT_SELECTION_CONFIDENCE = 0.30
 
 
 class FunctionSelectorError(Exception):
@@ -21,8 +23,10 @@ class FunctionSelectorError(Exception):
 
 @dataclass(frozen=True)
 class _FunctionCandidate:
+    """Function candidate for selection"""
+
     name: str
-    distinguishing_ids: tuple[int, ...]
+    distinguishing_ids: tuple[int, ...]  # first token of the function name
 
 
 class FunctionSelector:
@@ -39,9 +43,9 @@ class FunctionSelector:
         self._functions: list[FunctionDefinition] = functions
         self._threshold: float = confidence_threshold
         self._prompter: BobThePrompter = BobThePrompter(functions)
-        self._prefix: str = self._prompter.function_name_prefix()
+        self._prefix_text = self._prompter.function_name_prefix()
         self._prefix_ids: tuple[int, ...] = tuple(
-            encoded_to_token_ids(self._model.encode(self._prefix))
+            encoded_to_token_ids(self._model.encode(self._prefix_text))
         )
         self._candidates: list[_FunctionCandidate] = self._build_candidates()
 
@@ -51,7 +55,8 @@ class FunctionSelector:
             all_name_ids = encoded_to_token_ids(
                 self._model.encode(function_definition.name)
             )
-            distinguishing_ids = all_name_ids[len(self._prefix_ids):]
+            len_of_prefix = len(self._prefix_ids)  # fn_prefix
+            distinguishing_ids = all_name_ids[len_of_prefix:]
             if not distinguishing_ids:
                 raise FunctionSelectorError(
                     f"Function name '{function_definition.name}' has empty "
@@ -147,6 +152,5 @@ class FunctionSelector:
         model_probs = softmax(scores)
         best_index = self._best_index(model_probs)
         best_name = self._candidates[best_index].name
-        # validate using model-only probabilities
         self._validate_confidence(model_probs, best_index, best_name)
         return best_name

@@ -67,21 +67,15 @@ def load_prompt_items(path: str | Path) -> list[PromptItem]:
         ) from exc
 
 
-def write_text(path: str | Path, text: str) -> None:
-    """Write text to file, creating parent dirs if needed."""
-    out_path = Path(path)
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(text, encoding="utf-8")
-
-
-def write_json(path: str | Path, data: object) -> None:
-    """Write data as formatted JSON to file."""
-    write_text(path, json.dumps(data, ensure_ascii=False, indent=2))
-
-
 def write_function_results(
     path: str | Path,
     results: list[FunctionResult],
 ) -> None:
     """Write final result array with only prompt, name, parameters keys."""
-    write_json(path, [result.model_dump() for result in results])
+    out_path = Path(path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    payload = [result.model_dump() for result in results]
+    out_path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )

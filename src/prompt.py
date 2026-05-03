@@ -4,6 +4,8 @@ from src.models import FunctionDefinition
 
 
 class Prefix:
+    """Longest common prefix of function names"""
+
     @staticmethod
     def longest_common_prefix(strs: list[str]) -> str:
         if not strs:
@@ -23,14 +25,14 @@ class BobThePrompter:
         self._functions = functions
 
     def function_name_prefix(self) -> str:
-        _ = self._functions
-        return "fn"
+        """Shared text prefix of all function names (character-level LCP)."""
+        return Prefix.longest_common_prefix(
+            [fn.name for fn in self._functions],
+        )
 
     def build_selection_prompt(self, user_prompt: str) -> str:
-        prefix = self.function_name_prefix()
         fn_lines = "\n".join(
-            f"- {fn.name}: {fn.description}"
-            for fn in self._functions
+            f"- {fn.name}: {fn.description}" for fn in self._functions
         )
         return (
             "Select the correct function name for the request.\n\n"
@@ -38,7 +40,7 @@ class BobThePrompter:
             "Available functions:\n"
             f"{fn_lines}\n\n"
             "Return only function name.\n"
-            f"{prefix}"
+            f"{self.function_name_prefix()}"
         )
 
     def build_parameter_prompt(

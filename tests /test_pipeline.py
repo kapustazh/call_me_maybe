@@ -1,10 +1,10 @@
 import json
 from pathlib import Path
-from typing import cast
 
-from llm_sdk import Small_LLM_Model  # type: ignore
+import pytest
 
 from src.pipeline import Pipeline
+from src.prompt import Prefix
 
 
 class FakePipelineModel:
@@ -74,6 +74,9 @@ class GoldenPipelineModel:
         self._expected_by_prompt = {
             str(item["prompt"]): item for item in expected
         }
+        self._name_prefix = Prefix.longest_common_prefix(
+            [str(item["name"]) for item in expected],
+        )
 
     def encode(self, text: str) -> list[list[int]]:
         return [[ord(ch) for ch in text]]
@@ -90,7 +93,7 @@ class GoldenPipelineModel:
             generated = self._generated_parameter_suffix(text)
         else:
             target = self._selection_target(text)
-            generated = self._generated_selection_suffix(text, target)
+            generated = self._generated_selection_suffix(text)
         next_char = (
             target[len(generated)] if len(generated) < len(target) else " "
         )
@@ -107,7 +110,9 @@ class GoldenPipelineModel:
     def _selection_target(self, text: str) -> str:
         prompt = _between(text, "User request:\n", "\n\nAvailable functions:")
         item = self._expected_by_prompt[prompt]
-        return str(item["name"]).removeprefix("fn")
+        full = str(item["name"])
+        skip = len(self._name_prefix)
+        return full[skip:]
 
     def _parameter_target(self, text: str) -> str:
         prompt = _between(text, "User prompt:\n", "\n\nFunction name:")
@@ -121,17 +126,25 @@ class GoldenPipelineModel:
     def _generated_parameter_suffix(text: str) -> str:
         return text.rsplit("JSON literal:", 1)[1]
 
-    @staticmethod
-    def _generated_selection_suffix(text: str, target: str) -> str:
-        suffix = text.rsplit("Return only function name.\nfn", 1)[1]
-        return target[: len(suffix)] if target.startswith(suffix) else ""
+    def _generated_selection_suffix(self, text: str) -> str:
+        marker = "Return only function name.\n"
+        if marker not in text:
+            return ""
+        tail = text.split(marker, 1)[1]
+        if not tail.startswith(self._name_prefix):
+            return ""
+        skip = len(self._name_prefix)
+        return tail[skip:]
 
 
 def _between(text: str, start: str, end: str) -> str:
     return text.split(start, 1)[1].split(end, 1)[0]
 
 
-def test_pipeline_drops_invalid_prompt_results(tmp_path: Path) -> None:
+def test_pipeline_drops_invalid_prompt_results(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     functions_path = tmp_path / "functions.json"
     input_path = tmp_path / "input.json"
     output_path = tmp_path / "output.json"
@@ -181,15 +194,15 @@ def test_pipeline_drops_invalid_prompt_results(tmp_path: Path) -> None:
     )
     vocab_path.write_text(json.dumps(token_map), encoding="utf-8")
 
+    def _fake_model(*_a: object, **_k: object) -> FakePipelineModel:
+        return FakePipelineModel(tokenizer_path, vocab_path)
+
+    monkeypatch.setattr("src.pipeline.Small_LLM_Model", _fake_model)
     pipeline = Pipeline(
         str(functions_path),
         str(input_path),
         str(output_path),
         selection_confidence_threshold=0.80,
-        model_factory=lambda _: cast(
-            Small_LLM_Model,
-            FakePipelineModel(tokenizer_path, vocab_path),
-        ),
     )
     pipeline.run()
 
@@ -203,7 +216,10 @@ def test_pipeline_drops_invalid_prompt_results(tmp_path: Path) -> None:
     ]
 
 
-def test_pipeline_matches_results_golden_file(tmp_path: Path) -> None:
+def test_pipeline_matches_results_golden_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     repo_root = Path(__file__).resolve().parents[1]
     functions_path = repo_root / "data/input/functions_definition.json"
     input_path = repo_root / "data/input/function_calling_tests.json"
@@ -220,18 +236,18 @@ def test_pipeline_matches_results_golden_file(tmp_path: Path) -> None:
     )
     vocab_path.write_text(json.dumps(token_map), encoding="utf-8")
 
+    def _fake_model(*_a: object, **_k: object) -> GoldenPipelineModel:
+        return GoldenPipelineModel(
+            tokenizer_path,
+            vocab_path,
+            expected,
+        )
+
+    monkeypatch.setattr("src.pipeline.Small_LLM_Model", _fake_model)
     pipeline = Pipeline(
         str(functions_path),
         str(input_path),
         str(output_path),
-        model_factory=lambda _: cast(
-            Small_LLM_Model,
-            GoldenPipelineModel(
-                tokenizer_path,
-                vocab_path,
-                expected,
-            ),
-        ),
     )
     pipeline.run()
 
