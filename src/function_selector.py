@@ -11,10 +11,7 @@ from src.math_utils import softmax
 from src.models import FunctionDefinition
 from src.prompt import BobThePrompter
 
-# Softmax margin gate: skip when best candidate prob below this (near uniform).
-# Depends on the count of candidates.
-# Higher count => lower threshold => more candidates considered.
-DEFAULT_SELECTION_CONFIDENCE = 0.30
+_UNIFORM_MULTIPLIER = 4.5
 
 
 class FunctionSelectorError(Exception):
@@ -29,19 +26,34 @@ class _FunctionCandidate:
     distinguishing_ids: tuple[int, ...]  # first token of the function name
 
 
+def adaptive_threshold(n_candidates: int) -> float:
+    """Scale threshold with candidate count.
+
+    Matches 0.90 for 5 candidates, scales inversely for more.
+    Capped at 0.90 for small candidate sets.
+    """
+    if n_candidates <= 0:
+        return 1.0
+    return min(_UNIFORM_MULTIPLIER / n_candidates, 0.9)
+
+
 class FunctionSelector:
     def __init__(
         self,
         model: Small_LLM_Model,
         functions: list[FunctionDefinition],
         *,
-        confidence_threshold: float = DEFAULT_SELECTION_CONFIDENCE,
+        confidence_threshold: float | None = None,
     ) -> None:
         if not functions:
             raise ValueError("No functions provided for selection")
         self._model: Small_LLM_Model = model
         self._functions: list[FunctionDefinition] = functions
-        self._threshold: float = confidence_threshold
+        self._threshold: float = (
+            confidence_threshold
+            if confidence_threshold is not None
+            else adaptive_threshold(len(functions))
+        )
         self._prompter: BobThePrompter = BobThePrompter(functions)
         self._prefix_text = self._prompter.function_name_prefix()
         self._prefix_ids: tuple[int, ...] = tuple(

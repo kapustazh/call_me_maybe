@@ -9,7 +9,6 @@ from llm_sdk import Small_LLM_Model  # type: ignore
 
 from src.constrained_decoder import ConstrainedDecoder
 from src.function_selector import (
-    DEFAULT_SELECTION_CONFIDENCE,
     FunctionSelector,
     FunctionSelectorError,
 )
@@ -45,7 +44,7 @@ class Pipeline:
         input_path: str,
         output_path: str,
         model_name: str = "",
-        selection_confidence_threshold: float = DEFAULT_SELECTION_CONFIDENCE,
+        selection_confidence_threshold: float | None = None,
     ) -> None:
         self.functions_path: str = functions_path
         self.input_path: str = input_path
@@ -80,10 +79,15 @@ class Pipeline:
             else Small_LLM_Model()
         )
         tokenizer_vocab = TokenizerVocab.from_model(model)
+        selector_kwargs: dict[str, float] = {}
+        if self._selection_confidence_threshold is not None:
+            selector_kwargs["confidence_threshold"] = (
+                self._selection_confidence_threshold
+            )
         selector = FunctionSelector(
             model,
             function_definitions,
-            confidence_threshold=self._selection_confidence_threshold,
+            **selector_kwargs,
         )
         decoder = ConstrainedDecoder(
             model,

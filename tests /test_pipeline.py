@@ -24,12 +24,9 @@ class FakePipelineModel:
         text = "".join(chr(token_id) for token_id in input_ids)
         if "JSON literal:" not in text:
             logits = [-100.0] * 256
-            has_user = "User request:\n" in text
-            has_fn_list = "\n\nAvailable functions:\n" in text
-            if has_user and has_fn_list:
-                user_part = text.split("User request:\n", 1)[1].split(
-                    "\n\nAvailable functions:\n",
-                    1,
+            if "Request: \"" in text:
+                user_part = text.split("Request: \"", 1)[1].split(
+                    "\"", 1
                 )[0]
                 if "sum" in user_part.lower():
                     logits[ord("a")] = 10.0
@@ -108,7 +105,7 @@ class GoldenPipelineModel:
         return str(self._vocab_path)
 
     def _selection_target(self, text: str) -> str:
-        prompt = _between(text, "User request:\n", "\n\nAvailable functions:")
+        prompt = _between(text, "Request: \"", "\"\n\nThe correct function is:")
         item = self._expected_by_prompt[prompt]
         full = str(item["name"])
         skip = len(self._name_prefix)
@@ -127,7 +124,7 @@ class GoldenPipelineModel:
         return text.rsplit("JSON literal:", 1)[1]
 
     def _generated_selection_suffix(self, text: str) -> str:
-        marker = "Return only function name.\n"
+        marker = "The correct function is: "
         if marker not in text:
             return ""
         tail = text.split(marker, 1)[1]

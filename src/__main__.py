@@ -28,12 +28,19 @@ def main() -> None:
         default="data/output/function_calling_results.json",
         help="Path to the <name>.json for the output",
     )
+    _ = parser.add_argument(
+        "--threshold",
+        type=float,
+        default=None,
+        help="Selection confidence threshold (default: adaptive 2/N)",
+    )
     args: Namespace = parser.parse_args()
     try:
         pipeline = Pipeline(
             args.functions_definition,
             args.input,
             args.output,
+            selection_confidence_threshold=args.threshold,
         )
         pipeline.run()
     except (

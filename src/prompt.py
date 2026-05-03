@@ -34,13 +34,12 @@ class BobThePrompter:
         fn_lines = "\n".join(
             f"- {fn.name}: {fn.description}" for fn in self._functions
         )
+        _ = self.function_name_prefix()
         return (
             "Select the correct function name for the request.\n\n"
-            f"User request:\n{user_prompt}\n\n"
-            "Available functions:\n"
-            f"{fn_lines}\n\n"
-            "Return only function name.\n"
-            f"{self.function_name_prefix()}"
+            f"Available functions:\n{fn_lines}\n\n"
+            f'Request: "{user_prompt}"\n\n'
+            f"The correct function is: fn_"
         )
 
     def build_parameter_prompt(
