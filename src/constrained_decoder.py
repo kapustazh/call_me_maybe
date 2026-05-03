@@ -10,7 +10,8 @@ from src.json_literal_validators import (
     NumberValidator,
     StringValidator,
 )
-from src.model_protocol import LLMModelProtocolAdapter
+from llm_sdk import Small_LLM_Model  # type: ignore
+
 from src.model_utils import encoded_to_token_ids
 from src.models import FunctionDefinition
 from src.prompt import BobThePrompter
@@ -21,12 +22,12 @@ import math
 class ConstrainedDecoder:
     def __init__(
         self,
-        model: LLMModelProtocolAdapter,
+        model: Small_LLM_Model,
         tokenizer_vocab: TokenizerVocab,
         functions: list[FunctionDefinition],
         max_new_tokens: int = 120,
     ) -> None:
-        self._model: LLMModelProtocolAdapter = model
+        self._model: Small_LLM_Model = model
         self._max_new_tokens: int = max_new_tokens
         self._max_string_literal_length: int = max_new_tokens
         self._prompter: BobThePrompter = BobThePrompter(functions)

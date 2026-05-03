@@ -1,5 +1,8 @@
 import json
 from pathlib import Path
+from typing import cast
+
+from llm_sdk import Small_LLM_Model  # type: ignore
 
 from src.tokenizer_vocab import TokenizerVocab
 
@@ -67,7 +70,10 @@ def test_loads_token_map_from_tokenizer_file(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    model = FakeTokenizerModel(tokenizer_path, vocab_path)
+    model = cast(
+        Small_LLM_Model,
+        FakeTokenizerModel(tokenizer_path, vocab_path),
+    )
     vocab = TokenizerVocab.from_model(model)
 
     assert vocab.id_to_text(65) == "A"
@@ -83,7 +89,10 @@ def test_falls_back_to_vocab_file(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    model = FakeTokenizerModel(tokenizer_path, vocab_path)
+    model = cast(
+        Small_LLM_Model,
+        FakeTokenizerModel(tokenizer_path, vocab_path),
+    )
     vocab = TokenizerVocab.from_model(model)
 
     assert vocab.id_to_text(67) == "C"
@@ -99,7 +108,10 @@ def test_raw_and_decoded_id_maps() -> None:
         "<unk>": 4,
     }
     raw_vocab = TokenizerVocab(token_map)
-    decoded_vocab = TokenizerVocab(token_map, FakeDecodedModel())
+    decoded_vocab = TokenizerVocab(
+        token_map,
+        cast(Small_LLM_Model, FakeDecodedModel()),
+    )
 
     assert raw_vocab.id_to_text(1) == '"'
     assert decoded_vocab.id_to_text(1) == '"'

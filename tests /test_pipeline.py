@@ -1,5 +1,8 @@
 import json
 from pathlib import Path
+from typing import cast
+
+from llm_sdk import Small_LLM_Model  # type: ignore
 
 from src.pipeline import Pipeline
 
@@ -20,10 +23,22 @@ class FakePipelineModel:
     def get_logits_from_input_ids(self, input_ids: list[int]) -> list[float]:
         text = "".join(chr(token_id) for token_id in input_ids)
         if "JSON literal:" not in text:
-            return [0.0] * 256
+            logits = [-100.0] * 256
+            has_user = "User request:\n" in text
+            has_fn_list = "\n\nAvailable functions:\n" in text
+            if has_user and has_fn_list:
+                user_part = text.split("User request:\n", 1)[1].split(
+                    "\n\nAvailable functions:\n",
+                    1,
+                )[0]
+                if "sum" in user_part.lower():
+                    logits[ord("a")] = 10.0
+                    logits[ord("g")] = 1.0
+            return logits
         marker = "JSON literal:"
         marker_pos = text.rfind(marker)
-        generated = "" if marker_pos < 0 else text[marker_pos + len(marker) :]
+        end_marker = marker_pos + len(marker)
+        generated = "" if marker_pos < 0 else text[end_marker:]
         if "Function name: fn_add_numbers" in text:
             if "Parameter: a" in text:
                 target = "2"
@@ -170,18 +185,23 @@ def test_pipeline_skips_invalid_prompts(tmp_path: Path) -> None:
         str(functions_path),
         str(input_path),
         str(output_path),
-        model_factory=lambda _: FakePipelineModel(tokenizer_path, vocab_path),
+        model_factory=lambda _: cast(
+            Small_LLM_Model,
+            FakePipelineModel(tokenizer_path, vocab_path),
+        ),
     )
     pipeline.run()
 
     out = json.loads(output_path.read_text(encoding="utf-8"))
-    assert out == [
-        {
-            "prompt": "What is the sum of 2 and 3?",
-            "name": "fn_add_numbers",
-            "parameters": {"a": 2.0, "b": 3.0},
-        }
-    ]
+    assert len(out) == 2
+    assert out[0] == {
+        "prompt": "What is the sum of 2 and 3?",
+        "name": "fn_add_numbers",
+        "parameters": {"a": 2.0, "b": 3.0},
+    }
+    assert out[1]["prompt"] == "This prompt matches no function at all"
+    assert out[1]["name"] == "__error__"
+    assert "Low selection confidence" in out[1]["parameters"]["error"]
 
 
 def test_pipeline_matches_function_calls_golden_file(tmp_path: Path) -> None:
@@ -205,10 +225,13 @@ def test_pipeline_matches_function_calls_golden_file(tmp_path: Path) -> None:
         str(functions_path),
         str(input_path),
         str(output_path),
-        model_factory=lambda _: GoldenPipelineModel(
-            tokenizer_path,
-            vocab_path,
-            expected,
+        model_factory=lambda _: cast(
+            Small_LLM_Model,
+            GoldenPipelineModel(
+                tokenizer_path,
+                vocab_path,
+                expected,
+            ),
         ),
     )
     pipeline.run()

@@ -34,7 +34,9 @@ class BooleanValidator:
         )
 
     def is_valid_prefix(self, text: str) -> bool:
-        return text == "" or any(literal.startswith(text) for literal in self._literals)
+        return text == "" or any(
+            literal.startswith(text) for literal in self._literals
+        )
 
     def is_complete(self, text: str) -> bool:
         return text in self._literals
@@ -42,7 +44,9 @@ class BooleanValidator:
     def parse_value(self, text: str) -> object:
         value = json.loads(text)
         if not isinstance(value, bool):
-            raise ConstrainedDecodingError(f"Expected boolean JSON value, got: {text}")
+            raise ConstrainedDecodingError(
+                f"Expected boolean JSON value, got: {text}"
+            )
         return value
 
 
@@ -63,7 +67,9 @@ class EmptyObjectValidator:
     def parse_value(self, text: str) -> object:
         value = json.loads(text)
         if not isinstance(value, dict):
-            raise ConstrainedDecodingError(f"Expected object JSON value, got: {text}")
+            raise ConstrainedDecodingError(
+                f"Expected object JSON value, got: {text}"
+            )
         if value:
             raise ConstrainedDecodingError(
                 "Object parameter currently supports only empty '{}'"
@@ -106,7 +112,9 @@ class NumberValidator:
     def parse_value(self, text: str) -> object:
         value = json.loads(text)
         if isinstance(value, bool):
-            raise ConstrainedDecodingError(f"Expected numeric JSON value, got: {text}")
+            raise ConstrainedDecodingError(
+                f"Expected numeric JSON value, got: {text}"
+            )
         if self._integer_only:
             if not isinstance(value, int):
                 raise ConstrainedDecodingError(
@@ -114,7 +122,9 @@ class NumberValidator:
                 )
             return value
         if not isinstance(value, (int, float)):
-            raise ConstrainedDecodingError(f"Expected number JSON value, got: {text}")
+            raise ConstrainedDecodingError(
+                f"Expected number JSON value, got: {text}"
+            )
         return value
 
 
@@ -141,7 +151,9 @@ class StringValidator:
     def parse_value(self, text: str) -> object:
         value = json.loads(text)
         if not isinstance(value, str):
-            raise ConstrainedDecodingError(f"Expected string JSON value, got: {text}")
+            raise ConstrainedDecodingError(
+                f"Expected string JSON value, got: {text}"
+            )
         return value
 
 
@@ -154,22 +166,26 @@ def _scan_number_prefix(
     if text == "":
         return True, False
 
-    state = "start"
+    state: str | None = "start"
     for char in text:
-        state = _next_number_state(
+        if state is None:
+            return False, False
+        new_state = _next_number_state(
             state,
             char,
             allow_fraction=allow_fraction,
             allow_exponent=allow_exponent,
         )
-        if state is None:
+        if new_state is None:
             return False, False
+        state = new_state
 
     complete_states = {"int_zero", "int"}
     if allow_fraction:
         complete_states.add("frac")
     if allow_exponent:
         complete_states.add("exp")
+    assert state is not None
     return True, state in complete_states
 
 
@@ -268,13 +284,13 @@ def _scan_string_literal_prefix(text: str) -> tuple[bool, bool]:
 
 
 def _string_has_disallowed_jsonish_opening(text: str) -> bool:
-    """Reject strings that look like nested JSON or common bad tool-style opens.
+    """Reject strings that look like nested JSON or bad tool-style opens.
 
-    - ``"{`` / ``"  {`` — model nests objects inside string params.
-    - ``">{`` / ``"> `` — after blocking ``"{``, argmax often lands here and
-      closes early as junk (e.g. ``">{ "``).
+    - ``"{`` / ``"  {`` — nested objects inside string params.
+    - ``">{`` / ``"> `` — bad continuation after blocking ``"{`` (e.g.
+      ``">{ "``).
 
-    Still allows ``"[...`` (regex), ``">="``, and building ``">"`` (content ``>``).
+    Allows ``"[...`` (regex), ``">="``, and ``">"`` where ``>`` is content.
     """
     if not text.startswith('"'):
         return False

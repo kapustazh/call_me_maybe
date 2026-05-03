@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from typing import Mapping
 
+from llm_sdk import Small_LLM_Model  # type: ignore
+
 from src.io_utils import load_json_file
-from src.model_protocol import LLMModelProtocolAdapter
 
 
 class TokenizerVocabError(ValueError):
@@ -16,18 +17,19 @@ class TokenizerVocab:
     def __init__(
         self,
         token_to_id: Mapping[str, int],
-        model: LLMModelProtocolAdapter | None = None,
+        model: Small_LLM_Model | None = None,
     ) -> None:
         if not token_to_id:
             raise TokenizerVocabError("Tokenizer vocab is empty")
 
         self._id_to_token: dict[int, str] = {
-            int(token_id): str(token) for token, token_id in token_to_id.items()
+            int(token_id): str(token)
+            for token, token_id in token_to_id.items()
         }
-        self._model: LLMModelProtocolAdapter | None = model
+        self._model: Small_LLM_Model | None = model
 
     @classmethod
-    def from_model(cls, model: LLMModelProtocolAdapter) -> "TokenizerVocab":
+    def from_model(cls, model: Small_LLM_Model) -> "TokenizerVocab":
         tokenizer_error: ValueError | None = None
         try:
             token_map: dict[str, int] = _read_token_map(

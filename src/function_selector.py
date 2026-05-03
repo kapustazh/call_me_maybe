@@ -4,13 +4,16 @@ import math
 import re
 from collections import defaultdict
 from dataclasses import dataclass
-import numpy as np
 
-from src.model_protocol import LLMModelProtocolAdapter
+from llm_sdk import Small_LLM_Model  # type: ignore
+
 from src.model_utils import encoded_to_token_ids
 from src.math_utils import softmax
 from src.models import FunctionDefinition
 from src.prompt import BobThePrompter
+
+# Default selection confidence used across pipeline and selector
+DEFAULT_SELECTION_CONFIDENCE = 0.90
 
 
 class FunctionSelectorError(Exception):
@@ -27,14 +30,14 @@ class _FunctionCandidate:
 class FunctionSelector:
     def __init__(
         self,
-        model: LLMModelProtocolAdapter,
+        model: Small_LLM_Model,
         functions: list[FunctionDefinition],
         *,
-        confidence_threshold: float = 0.90,
+        confidence_threshold: float = DEFAULT_SELECTION_CONFIDENCE,
     ) -> None:
         if not functions:
             raise ValueError("No functions provided for selection")
-        self._model: LLMModelProtocolAdapter = model
+        self._model: Small_LLM_Model = model
         self._functions: list[FunctionDefinition] = functions
         self._threshold: float = confidence_threshold
         self._prompter: BobThePrompter = BobThePrompter(functions)
@@ -139,11 +142,6 @@ class FunctionSelector:
         return scores
 
     def select(self, user_prompt: str) -> str:
-        lexical_scores = self._lexical_scores(user_prompt)
-        lexical_override = self._lexical_override_index(lexical_scores)
-        if lexical_override is not None:
-            return self._candidates[lexical_override].name
-
         prompt = self._prompter.build_selection_prompt(user_prompt)
         base_ids = encoded_to_token_ids(self._model.encode(prompt))
         scores = self._boundary_scores(base_ids)
@@ -154,45 +152,8 @@ class FunctionSelector:
                 "No valid function candidate from logits"
             )
         model_probs = softmax(scores)
-        lexical_probs = softmax(lexical_scores)
-        combined_probs = [
-            0.4 * model_prob + 0.6 * lexical_prob
-            for model_prob, lexical_prob in zip(model_probs, lexical_probs)
-        ]
-        best_index = self._best_index(combined_probs)
+        best_index = self._best_index(model_probs)
         best_name = self._candidates[best_index].name
-        self._validate_confidence(combined_probs, best_index, best_name)
+        # validate using model-only probabilities
+        self._validate_confidence(model_probs, best_index, best_name)
         return best_name
-
-    def _lexical_scores(self, user_prompt: str) -> list[float]:
-        prompt_tokens = {
-            token
-            for token in re.split(r"[^a-z0-9]+", user_prompt.lower())
-            if token and len(token) > 1
-        }
-        if not prompt_tokens:
-            return [0.0] * len(self._candidates)
-
-        scores: list[float] = []
-        for candidate in self._candidates:
-            overlap = prompt_tokens.intersection(candidate.keywords)
-            score = float(len(overlap))
-            scores.append(score)
-        return scores
-
-    @staticmethod
-    def _lexical_override_index(
-        lexical_scores: list[float],
-    ) -> int | None:
-        if not lexical_scores:
-            return None
-        best_index: int = int(np.argmax(lexical_scores))
-        best_score = lexical_scores[best_index]
-        if best_score <= 0:
-            return None
-        sorted_scores = sorted(lexical_scores, reverse=True)
-        second_best = sorted_scores[1] if len(sorted_scores) > 1 else -math.inf
-        # One extra keyword match is enough to override weak model logits.
-        if best_score >= second_best + 1.0:
-            return int(best_index)
-        return None

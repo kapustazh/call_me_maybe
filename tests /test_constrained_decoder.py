@@ -1,3 +1,7 @@
+from typing import cast
+
+from llm_sdk import Small_LLM_Model  # type: ignore
+
 from src.constrained_decoder import ConstrainedDecoder
 from src.models import FunctionDefinition, FunctionParameter
 from src.tokenizer_vocab import TokenizerVocab
@@ -63,7 +67,7 @@ class FakeDecoderModel:
 
 
 def test_decodes_typed_parameters() -> None:
-    model = FakeDecoderModel()
+    model = cast(Small_LLM_Model, FakeDecoderModel())
     token_map = {chr(code): code for code in range(32, 127)}
     vocab = TokenizerVocab(token_map, model=model)
     function_definition = FunctionDefinition(
@@ -90,7 +94,7 @@ def test_decodes_typed_parameters() -> None:
 
 
 def test_extracts_sum_numbers_from_prompt() -> None:
-    model = FakeDecoderModel()
+    model = cast(Small_LLM_Model, FakeDecoderModel())
     token_map = {chr(code): code for code in range(32, 127)}
     vocab = TokenizerVocab(token_map, model=model)
     function_definition = FunctionDefinition(
@@ -117,7 +121,7 @@ def test_extracts_sum_numbers_from_prompt() -> None:
 
 
 def test_extracts_reverse_string_from_prompt() -> None:
-    model = FakeDecoderModel()
+    model = cast(Small_LLM_Model, FakeDecoderModel())
     token_map = {chr(code): code for code in range(32, 127)}
     vocab = TokenizerVocab(token_map, model=model)
     function_definition = FunctionDefinition(
@@ -141,7 +145,7 @@ def test_extracts_reverse_string_from_prompt() -> None:
 
 
 def test_extracts_regex_replacement_with_inner_with() -> None:
-    model = FakeDecoderModel()
+    model = cast(Small_LLM_Model, FakeDecoderModel())
     token_map = {chr(code): code for code in range(32, 127)}
     vocab = TokenizerVocab(token_map, model=model)
     function_definition = FunctionDefinition(
