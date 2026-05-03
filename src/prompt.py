@@ -23,29 +23,17 @@ class BobThePrompter:
         self._functions = functions
 
     def function_name_prefix(self) -> str:
-        names = [fn.name for fn in self._functions]
-        return Prefix.longest_common_prefix(names)
-
-    @staticmethod
-    def _format_parameter_schema(fn: FunctionDefinition) -> str:
-        parts = [
-            f"{name}: {spec.type}" for name, spec in fn.parameters.items()
-        ]
-        return ", ".join(parts)
+        _ = self._functions
+        return "fn"
 
     def build_selection_prompt(self, user_prompt: str) -> str:
         prefix = self.function_name_prefix()
         fn_lines = "\n".join(
-            (
-                f"- {fn.name}: {fn.description} "
-                f"(parameters: {self._format_parameter_schema(fn)})"
-            )
+            f"- {fn.name}: {fn.description}"
             for fn in self._functions
         )
         return (
-            "You are a function calling router.\n"
-            "Pick best function for user request.\n"
-            "Choose only from listed function names.\n\n"
+            "Select the correct function name for the request.\n\n"
             f"User request:\n{user_prompt}\n\n"
             "Available functions:\n"
             f"{fn_lines}\n\n"

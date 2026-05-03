@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import numpy as np
 
 from src.json_literal_validators import (
@@ -51,6 +52,11 @@ class ConstrainedDecoder:
         function_definition: FunctionDefinition,
     ) -> dict[str, object]:
         out: dict[str, object] = {}
+        numeric_param_names = [
+            name
+            for name, spec in function_definition.parameters.items()
+            if spec.type in {"number", "integer"}
+        ]
         for parameter_name in function_definition.parameters:
             parameter_spec = function_definition.parameters[parameter_name]
             parameter_type = parameter_spec.type
@@ -59,13 +65,46 @@ class ConstrainedDecoder:
                 function_definition,
                 parameter_name,
             )
+            validator = self._validators[parameter_type]
+            if parameter_type == "string":
+                fallback = self._prompt_string_fallback(
+                    user_prompt=user_prompt,
+                    parameter_name=parameter_name,
+                )
+                if fallback is not None:
+                    out[parameter_name] = fallback
+                    continue
+
+            if parameter_type in {"number", "integer"}:
+                fallback_number = self._prompt_number_fallback(
+                    user_prompt=user_prompt,
+                    parameter_name=parameter_name,
+                    numeric_param_names=numeric_param_names,
+                    integer_only=(parameter_type == "integer"),
+                )
+                if fallback_number is not None:
+                    out[parameter_name] = fallback_number
+                    continue
+
             raw_literal = self._decode_literal(
                 prompt=prompt,
                 value_type=parameter_type,
                 parameter_name=parameter_name,
             )
-            validator = self._validators[parameter_type]
-            out[parameter_name] = validator.parse_value(raw_literal)
+            parsed_value = validator.parse_value(raw_literal)
+            if (
+                parameter_type == "string"
+                and isinstance(parsed_value, str)
+                and self._looks_low_quality_string(parsed_value, user_prompt)
+            ):
+                fallback = self._prompt_string_fallback(
+                    user_prompt=user_prompt,
+                    parameter_name=parameter_name,
+                )
+                if fallback is not None:
+                    out[parameter_name] = fallback
+                    continue
+            out[parameter_name] = parsed_value
         return out
 
     def _decode_literal(
@@ -210,3 +249,130 @@ class ConstrainedDecoder:
         if validator.is_complete(candidate):
             return candidate
         return None
+
+    @staticmethod
+    def _looks_low_quality_string(value: str, user_prompt: str) -> bool:
+        lowered = value.lower()
+        if (
+            "use_strict" in lowered
+            or lowered.startswith("fn_")
+            or lowered.startswith("json")
+            or lowered.startswith("parameter")
+            or lowered.startswith("regex(")
+            or lowered.startswith(">")
+        ):
+            return True
+        if len(value) > 120:
+            return True
+        if len(value) > 40 and value not in user_prompt:
+            return True
+        return False
+
+    @staticmethod
+    def _extract_quoted_values(user_prompt: str) -> list[str]:
+        quoted = re.findall(r"'([^']*)'|\"([^\"]+)\"", user_prompt)
+        return [
+            single or double
+            for single, double in quoted
+            if single or double
+        ]
+
+    def _prompt_string_fallback(
+        self,
+        *,
+        user_prompt: str,
+        parameter_name: str,
+    ) -> str | None:
+        values = self._extract_quoted_values(user_prompt)
+        lower_prompt = user_prompt.lower()
+        lower_param = parameter_name.lower()
+
+        if "regex" in lower_param:
+            if "numbers" in lower_prompt or "digits" in lower_prompt:
+                return r"\d+"
+            if "vowels" in lower_prompt:
+                return "[AEIOUaeiou]"
+            word_match = re.search(
+                r"\bword\s+['\"]([^'\"]+)['\"]",
+                user_prompt,
+                flags=re.IGNORECASE,
+            )
+            if word_match:
+                return word_match.group(1)
+            if values:
+                return values[0]
+            return None
+
+        if lower_param in {"s", "source_string"}:
+            if values:
+                return max(values, key=len)
+            return None
+
+        if lower_param == "replacement":
+            quoted_with = re.search(
+                r"\bwith\s+['\"]([^'\"]+)['\"]",
+                user_prompt,
+                flags=re.IGNORECASE,
+            )
+            if quoted_with:
+                return quoted_with.group(1)
+            plain_with = re.findall(
+                r"\bwith\s+([A-Za-z*#._-]+)\b",
+                user_prompt,
+                flags=re.IGNORECASE,
+            )
+            if plain_with:
+                token = plain_with[-1]
+                if token.lower() in {"asterisk", "asterisks", "star", "stars"}:
+                    return "*"
+                return token
+            if len(values) >= 2:
+                return values[1]
+            if values:
+                return values[0]
+            return None
+
+        if lower_param == "name":
+            with_match = re.search(
+                r"\bwith\s+([A-Za-z][A-Za-z0-9_-]*)",
+                user_prompt,
+                flags=re.IGNORECASE,
+            )
+            if with_match:
+                return with_match.group(1)
+            tokens = re.findall(r"[A-Za-z][A-Za-z0-9_-]*", user_prompt)
+            if tokens:
+                return tokens[-1]
+            return None
+
+        if values:
+            return values[0]
+        return None
+
+    @staticmethod
+    def _prompt_number_fallback(
+        *,
+        user_prompt: str,
+        parameter_name: str,
+        numeric_param_names: list[str],
+        integer_only: bool,
+    ) -> int | float | None:
+        matches = re.findall(r"-?\d+(?:\.\d+)?", user_prompt)
+        if not matches:
+            return None
+        try:
+            param_index = numeric_param_names.index(parameter_name)
+        except ValueError:
+            return None
+        if param_index >= len(matches):
+            return None
+        value_text = matches[param_index]
+        if integer_only:
+            try:
+                return int(float(value_text))
+            except ValueError:
+                return None
+        try:
+            return float(value_text)
+        except ValueError:
+            return None

@@ -107,7 +107,7 @@ class GoldenPipelineModel:
     def _selection_target(self, text: str) -> str:
         prompt = _between(text, "User request:\n", "\n\nAvailable functions:")
         item = self._expected_by_prompt[prompt]
-        return str(item["name"]).removeprefix("fn_")
+        return str(item["name"]).removeprefix("fn")
 
     def _parameter_target(self, text: str) -> str:
         prompt = _between(text, "User prompt:\n", "\n\nFunction name:")
@@ -123,7 +123,7 @@ class GoldenPipelineModel:
 
     @staticmethod
     def _generated_selection_suffix(text: str, target: str) -> str:
-        suffix = text.rsplit("Return only function name.\nfn_", 1)[1]
+        suffix = text.rsplit("Return only function name.\nfn", 1)[1]
         return target[: len(suffix)] if target.startswith(suffix) else ""
 
 
@@ -131,7 +131,7 @@ def _between(text: str, start: str, end: str) -> str:
     return text.split(start, 1)[1].split(end, 1)[0]
 
 
-def test_pipeline_skips_invalid_prompts(tmp_path: Path) -> None:
+def test_pipeline_drops_invalid_prompt_results(tmp_path: Path) -> None:
     functions_path = tmp_path / "functions.json"
     input_path = tmp_path / "input.json"
     output_path = tmp_path / "output.json"
@@ -185,6 +185,7 @@ def test_pipeline_skips_invalid_prompts(tmp_path: Path) -> None:
         str(functions_path),
         str(input_path),
         str(output_path),
+        selection_confidence_threshold=0.80,
         model_factory=lambda _: cast(
             Small_LLM_Model,
             FakePipelineModel(tokenizer_path, vocab_path),
@@ -193,22 +194,20 @@ def test_pipeline_skips_invalid_prompts(tmp_path: Path) -> None:
     pipeline.run()
 
     out = json.loads(output_path.read_text(encoding="utf-8"))
-    assert len(out) == 2
-    assert out[0] == {
-        "prompt": "What is the sum of 2 and 3?",
-        "name": "fn_add_numbers",
-        "parameters": {"a": 2.0, "b": 3.0},
-    }
-    assert out[1]["prompt"] == "This prompt matches no function at all"
-    assert out[1]["name"] == "__error__"
-    assert "Low selection confidence" in out[1]["parameters"]["error"]
+    assert out == [
+        {
+            "prompt": "What is the sum of 2 and 3?",
+            "name": "fn_add_numbers",
+            "parameters": {"a": 2.0, "b": 3.0},
+        }
+    ]
 
 
-def test_pipeline_matches_function_calls_golden_file(tmp_path: Path) -> None:
+def test_pipeline_matches_results_golden_file(tmp_path: Path) -> None:
     repo_root = Path(__file__).resolve().parents[1]
     functions_path = repo_root / "data/input/functions_definition.json"
     input_path = repo_root / "data/input/function_calling_tests.json"
-    expected_path = repo_root / "data/output/function_calls.json"
+    expected_path = repo_root / "data/output/function_calling_results.json"
     output_path = tmp_path / "output.json"
     tokenizer_path = tmp_path / "tokenizer.json"
     vocab_path = tmp_path / "vocab.json"

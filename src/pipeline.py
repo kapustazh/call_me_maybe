@@ -39,7 +39,7 @@ class Pipeline:
         self._model_factory = model_factory
 
     def run(self) -> None:
-        """Build one function-call result per prompt."""
+        """Build function-call results and skip invalid prompts."""
         prompt_items = load_prompt_items(self.input_path)
         function_definitions = load_function_definitions(self.functions_path)
         function_by_name = {
@@ -61,6 +61,7 @@ class Pipeline:
         )
 
         out: list[FunctionResult] = []
+        skipped_count = 0
         for item in prompt_items:
             try:
                 selected_name = selector.select(item.prompt)
@@ -84,18 +85,20 @@ class Pipeline:
                 ConstrainedDecodingError,
                 ValueError,
             ) as exc:
-                # Emit error row to preserve 1:1 mapping and aid debugging
                 err_msg = str(exc)
                 print(f"Error processing prompt: {err_msg}", file=sys.stderr)
-                out.append(
-                    FunctionResult(
-                        prompt=item.prompt,
-                        name="__error__",
-                        parameters={"error": err_msg},
-                    )
-                )
+                skipped_count += 1
+                continue
 
         write_function_results(self.output_path, out)
+        if skipped_count:
+            print(
+                (
+                    f"Skipped {skipped_count} prompt(s) due to "
+                    "routing/decoding errors"
+                ),
+                file=sys.stderr,
+            )
 
     def _build_model(self) -> Small_LLM_Model:
         if self._model_factory is not None:
