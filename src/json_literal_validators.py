@@ -1,4 +1,10 @@
-"""JSON literal prefix checks and typed parse for constrained decoding."""
+"""JSON literal prefix checks and typed parse for constrained decoding.
+
+(1) Validators: `is_valid_prefix` / `allows_token_piece` / `is_complete` keep
+    the partial text in a JSON literal subset the tokenizer can emit.
+(2) `parse_value` is only for *complete* strings that already passed
+    `is_complete`; it decodes the same subset to Python values.
+"""
 
 from __future__ import annotations
 
@@ -9,6 +15,42 @@ from typing import Protocol
 
 class ConstrainedDecodingError(RuntimeError):
     """Raised when constrained decoding cannot produce a valid value."""
+
+
+def _expect_json_type(
+    text: str,
+    py_type: type | tuple[type, ...],
+    what: str,
+) -> object:
+    value = json.loads(text)
+    if not isinstance(value, py_type):
+        raise ConstrainedDecodingError(
+            f"Expected {what} JSON value, got: {text}"
+        )
+    return value
+
+
+def _expect_json_number(
+    text: str,
+    *,
+    integer_only: bool,
+) -> int | float:
+    value = json.loads(text)
+    if isinstance(value, bool):
+        raise ConstrainedDecodingError(
+            f"Expected numeric JSON value, got: {text}"
+        )
+    if integer_only:
+        if not isinstance(value, int):
+            raise ConstrainedDecodingError(
+                f"Expected integer JSON value, got: {text}"
+            )
+        return value
+    if not isinstance(value, (int, float)):
+        raise ConstrainedDecodingError(
+            f"Expected number JSON value, got: {text}"
+        )
+    return value
 
 
 class LiteralValidator(Protocol):
@@ -42,21 +84,23 @@ class BooleanValidator:
         return text in self._literals
 
     def parse_value(self, text: str) -> object:
-        value = json.loads(text)
-        if not isinstance(value, bool):
-            raise ConstrainedDecodingError(
-                f"Expected boolean JSON value, got: {text}"
-            )
-        return value
+        if text == "true":
+            return True
+        if text == "false":
+            return False
+        raise ConstrainedDecodingError(
+            f"Expected boolean JSON value, got: {text}"
+        )
 
 
 class EmptyObjectValidator:
     _valid_prefixes = ("", "{", "{}")
 
+    # Only these strings may be emitted as one tokenizer piece for `{}`.
+    _ALLOWED_PIECES = frozenset({"{", "}", "{}"})
+
     def allows_token_piece(self, piece: str) -> bool:
-        return piece in {"{", "}", "{}"} or (
-            piece != "" and len(piece) <= 2 and set(piece) <= {"{", "}"}
-        )
+        return piece in self._ALLOWED_PIECES
 
     def is_valid_prefix(self, text: str) -> bool:
         return text in self._valid_prefixes
@@ -65,11 +109,7 @@ class EmptyObjectValidator:
         return text == "{}"
 
     def parse_value(self, text: str) -> object:
-        value = json.loads(text)
-        if not isinstance(value, dict):
-            raise ConstrainedDecodingError(
-                f"Expected object JSON value, got: {text}"
-            )
+        value = _expect_json_type(text, dict, "object")
         if value:
             raise ConstrainedDecodingError(
                 "Object parameter currently supports only empty '{}'"
@@ -78,19 +118,23 @@ class EmptyObjectValidator:
 
 
 class NumberValidator:
+    _INT_PIECE_CHARS = frozenset("-0123456789")
+    _FLOAT_PIECE_CHARS = frozenset("-+0123456789.eE")
+    # Upper bound on one BPE merge piece while scanning a JSON number (avoids
+    # pathological long runs; aligned with small vocab slices).
+    _MAX_TOKEN_PIECE_LEN = 8
+
     def __init__(self, *, integer_only: bool) -> None:
         self._integer_only: bool = integer_only
+        self._piece_chars: frozenset[str] = (
+            self._INT_PIECE_CHARS if integer_only else self._FLOAT_PIECE_CHARS
+        )
 
     def allows_token_piece(self, piece: str) -> bool:
-        allowed_chars = (
-            frozenset("-0123456789")
-            if self._integer_only
-            else frozenset("-+0123456789.eE")
-        )
         return (
             piece != ""
-            and len(piece) <= 8
-            and all(char in allowed_chars for char in piece)
+            and len(piece) <= self._MAX_TOKEN_PIECE_LEN
+            and all(char in self._piece_chars for char in piece)
         )
 
     def is_valid_prefix(self, text: str) -> bool:
@@ -110,37 +154,23 @@ class NumberValidator:
         return complete
 
     def parse_value(self, text: str) -> object:
-        value = json.loads(text)
-        if isinstance(value, bool):
-            raise ConstrainedDecodingError(
-                f"Expected numeric JSON value, got: {text}"
-            )
-        if self._integer_only:
-            if not isinstance(value, int):
-                raise ConstrainedDecodingError(
-                    f"Expected integer JSON value, got: {text}"
-                )
-            return value
-        if not isinstance(value, (int, float)):
-            raise ConstrainedDecodingError(
-                f"Expected number JSON value, got: {text}"
-            )
-        return value
+        return _expect_json_number(text, integer_only=self._integer_only)
 
 
 class StringValidator:
+    # Single tokenizer merge max length for string body chars (no quote).
+    _MAX_TOKEN_PIECE_LEN = 4
+
     def allows_token_piece(self, piece: str) -> bool:
         if piece == "" or "\n" in piece or "\r" in piece:
             return False
-        if len(piece) > 4:
+        if len(piece) > self._MAX_TOKEN_PIECE_LEN:
             return False
         if any(ord(char) < 32 for char in piece):
             return False
         return True
 
     def is_valid_prefix(self, text: str) -> bool:
-        if _string_has_disallowed_jsonish_opening(text):
-            return False
         valid, _ = _scan_string_literal_prefix(text)
         return valid
 
@@ -149,12 +179,7 @@ class StringValidator:
         return complete
 
     def parse_value(self, text: str) -> object:
-        value = json.loads(text)
-        if not isinstance(value, str):
-            raise ConstrainedDecodingError(
-                f"Expected string JSON value, got: {text}"
-            )
-        return value
+        return _expect_json_type(text, str, "string")
 
 
 def _scan_number_prefix(
@@ -206,11 +231,11 @@ def _next_number_state(
             allow_exponent=allow_exponent,
         )
     if state in {"dot", "exp_sign", "exp"}:
-        return (
-            "frac"
-            if state == "dot" and char in string.digits
-            else ("exp" if state != "dot" and char in string.digits else None)
-        )
+        if state == "dot" and char in string.digits:
+            return "frac"
+        if state != "dot" and char in string.digits:
+            return "exp"
+        return None
     if state == "exp_mark":
         if char in "+-":
             return "exp_sign"
@@ -245,10 +270,20 @@ def _number_body_state(
 
 
 def _scan_string_literal_prefix(text: str) -> tuple[bool, bool]:
+    """Reject strings that look like nested JSON or bad tool-style opens."""
     if text == "":
         return True, False
     if text[0] != '"':
         return False, False
+
+    inner = text[1:]
+    if inner:
+        stripped = inner.lstrip()
+        if stripped.startswith("{"):
+            return False, False
+        if len(stripped) >= 2 and stripped[0] == ">":
+            if stripped[1] == "{" or stripped[1].isspace():
+                return False, False
 
     escaped = False
     unicode_digits_left = 0
@@ -281,28 +316,6 @@ def _scan_string_literal_prefix(text: str) -> tuple[bool, bool]:
             return False, False
         index += 1
     return True, False
-
-
-def _string_has_disallowed_jsonish_opening(text: str) -> bool:
-    """Reject strings that look like nested JSON or bad tool-style opens.
-
-    - ``"{`` / ``"  {`` — nested objects inside string params.
-    - ``">{`` / ``"> `` — bad continuation after blocking ``"{`` (e.g.
-      ``">{ "``).
-
-    Allows ``"[...`` (regex), ``">="``, and ``">"`` where ``>`` is content.
-    """
-    if not text.startswith('"'):
-        return False
-    inner = text[1:]
-    if not inner:
-        return False
-    stripped = inner.lstrip()
-    if stripped.startswith("{"):
-        return True
-    if len(stripped) >= 2 and stripped[0] == ">":
-        return stripped[1] == "{" or stripped[1].isspace()
-    return False
 
 
 def _is_hex_digit(char: str) -> bool:
