@@ -5,7 +5,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 
 from llm_sdk import Small_LLM_Model  # type: ignore
-
+import numpy as np
 from src.model_utils import encoded_to_token_ids
 from src.math_utils import softmax
 from src.models import FunctionDefinition
@@ -23,7 +23,9 @@ class _FunctionCandidate:
     """Function candidate for selection"""
 
     name: str
-    distinguishing_ids: tuple[int, ...]  # first token of the function name
+    distinguishing_ids: tuple[
+        int, ...
+    ]  # tokens after selection_completion_prefix
 
 
 def adaptive_threshold(n_candidates: int) -> float:
@@ -69,11 +71,6 @@ class FunctionSelector:
             )
             len_of_prefix = len(self._prefix_ids)  # fn_prefix
             distinguishing_ids = all_name_ids[len_of_prefix:]
-            if not distinguishing_ids:
-                raise FunctionSelectorError(
-                    f"Function name '{function_definition.name}' has empty "
-                    "suffix after prefix split"
-                )
             candidates.append(
                 _FunctionCandidate(
                     name=function_definition.name,
@@ -86,7 +83,7 @@ class FunctionSelector:
     def _best_index(probs: list[float]) -> int:
         if not probs:
             raise FunctionSelectorError("No function candidates")
-        best_index = max(range(len(probs)), key=probs.__getitem__)
+        best_index = np.argmax(probs)
         return int(best_index)
 
     def _validate_confidence(
