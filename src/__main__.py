@@ -58,7 +58,20 @@ def main() -> None:
         "--threshold",
         type=float,
         default=None,
-        help="Selection confidence threshold (default: adaptive 2/N)",
+        help=(
+            "Selection confidence threshold "
+            "(default: adaptive min(3/N, 0.9))"
+        ),
+    )
+    _ = parser.add_argument(
+        "--selection-peak-target",
+        type=float,
+        default=None,
+        metavar="P",
+        help=(
+            "Anneal softmax temperature until the top candidate reaches "
+            "mass P (default: 0.9; use P>=1.0 to disable annealing)"
+        ),
     )
     args: Namespace = parser.parse_args()
     try:
@@ -67,6 +80,7 @@ def main() -> None:
             args.input,
             args.output,
             selection_confidence_threshold=args.threshold,
+            selection_peak_softmax_target=args.selection_peak_target,
         )
         pipeline.run()
     except (

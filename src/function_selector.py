@@ -12,6 +12,9 @@ from src.models import FunctionDefinition
 from src.prompt import BobThePrompter
 
 _UNIFORM_MULTIPLIER = 3.0
+# Sharpen softmax over selection scores until top mass ≥ this (or schedule ends).
+_TARGET_TOP_SOFTMAX_PROB = 0.9
+_TEMPERATURE_SCHEDULE = (1.0, 0.7, 0.5, 0.35, 0.25, 0.15, 0.1, 0.05)
 
 
 class FunctionSelectorError(Exception):
@@ -46,6 +49,7 @@ class FunctionSelector:
         functions: list[FunctionDefinition],
         *,
         confidence_threshold: float | None = None,
+        peak_softmax_target: float | None = None,
     ) -> None:
         if not functions:
             raise ValueError("No functions provided for selection")
@@ -56,21 +60,39 @@ class FunctionSelector:
             if confidence_threshold is not None
             else adaptive_threshold(len(functions))
         )
-        self._prompter: BobThePrompter = BobThePrompter(functions)
-        self._prefix_text = self._prompter.function_name_prefix()
-        self._prefix_ids: tuple[int, ...] = tuple(
-            encoded_to_token_ids(self._model.encode(self._prefix_text))
+        self._peak_target: float = (
+            peak_softmax_target
+            if peak_softmax_target is not None
+            else _TARGET_TOP_SOFTMAX_PROB
         )
+        self._prompter: BobThePrompter = BobThePrompter(functions)
         self._candidates: list[_FunctionCandidate] = self._build_candidates()
 
     def _build_candidates(self) -> list[_FunctionCandidate]:
+        """Tokenize the character-level suffix after the shared name prefix.
+
+        Slicing *name* token ids by *len(prefix token ids)* is wrong: BPE
+        boundaries for ``prefix`` need not align with those for ``full name``.
+        """
         candidates: list[_FunctionCandidate] = []
+        prefix = self._prompter.function_name_prefix()
+        prefix_len = len(prefix)
         for function_definition in self._functions:
-            all_name_ids = encoded_to_token_ids(
-                self._model.encode(function_definition.name)
+            name = function_definition.name
+            if prefix and name.startswith(prefix):
+                suffix = name[prefix_len:]
+            else:
+                suffix = name
+            if not suffix:
+                suffix = name
+            distinguishing_ids = encoded_to_token_ids(
+                self._model.encode(suffix)
             )
-            len_of_prefix = len(self._prefix_ids)  # fn_prefix
-            distinguishing_ids = all_name_ids[len_of_prefix:]
+            if not distinguishing_ids:
+                raise FunctionSelectorError(
+                    "Tokenizer produced no token ids for the selection "
+                    f"suffix of {name!r} (prefix {prefix!r})"
+                )
             candidates.append(
                 _FunctionCandidate(
                     name=function_definition.name,
@@ -98,6 +120,28 @@ class FunctionSelector:
                 f"Low selection confidence: {confidence:.3f} < "
                 f"{self._threshold:.3f} for '{best_name}'"
             )
+
+    @staticmethod
+    def _softmax_at_temperature(
+        scores: list[float], temperature: float
+    ) -> list[float]:
+        if temperature <= 0:
+            raise ValueError("temperature must be positive")
+        scaled = [s / temperature for s in scores]
+        return softmax(scaled)
+
+    def _probs_with_peak_target(self, scores: list[float]) -> list[float]:
+        """Cool temperature until the top softmax mass reaches the target."""
+        if self._peak_target >= 1.0:
+            return softmax(scores)
+        probs = self._softmax_at_temperature(scores, _TEMPERATURE_SCHEDULE[0])
+        peak = max(probs) if probs else 0.0
+        for t in _TEMPERATURE_SCHEDULE[1:]:
+            if peak >= self._peak_target:
+                break
+            probs = self._softmax_at_temperature(scores, t)
+            peak = max(probs)
+        return probs
 
     def _candidate_scores(self, base_ids: list[int]) -> list[float]:
         logits = self._model.get_logits_from_input_ids(base_ids)
@@ -158,7 +202,7 @@ class FunctionSelector:
             raise FunctionSelectorError(
                 "No valid function candidate from logits"
             )
-        model_probs = softmax(scores)
+        model_probs = self._probs_with_peak_target(scores)
         best_index = self._best_index(model_probs)
         best_name = self._candidates[best_index].name
         self._validate_confidence(model_probs, best_index, best_name)

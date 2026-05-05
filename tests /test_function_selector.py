@@ -94,3 +94,21 @@ def test_model_selection_when_logits_favor_add() -> None:
     )
     selected = selector.select("Greet john")
     assert selected == "fn_add_numbers"
+
+
+def test_single_function_does_not_crash() -> None:
+    number = FunctionParameter(type="number")
+    only = [
+        FunctionDefinition(
+            name="fn_strlen",
+            description="String length",
+            parameters={"s": FunctionParameter(type="string")},
+            returns=number,
+        ),
+    ]
+    selector = FunctionSelector(
+        cast(Small_LLM_Model, FakeSelectorModel(mode="ambiguous")),
+        only,
+        confidence_threshold=0.01,
+    )
+    assert selector.select("How long is hello?") == "fn_strlen"

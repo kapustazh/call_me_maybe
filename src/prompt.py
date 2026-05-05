@@ -26,20 +26,21 @@ class BobThePrompter:
 
     def function_name_prefix(self) -> str:
         """Shared text prefix of all function names (character-level LCP)."""
-        return Prefix.longest_common_prefix(
-            [fn.name for fn in self._functions],
-        )
+        names = [fn.name for fn in self._functions]
+        if len(names) <= 1:
+            return ""
+        return Prefix.longest_common_prefix(names)
 
     def build_selection_prompt(self, user_prompt: str) -> str:
+        prefix = self.function_name_prefix()
         fn_lines = "\n".join(
             f"- {fn.name}: {fn.description}" for fn in self._functions
         )
-        _ = self.function_name_prefix()
         return (
             "Select the correct function name for the request.\n\n"
             f"Available functions:\n{fn_lines}\n\n"
             f'Request: "{user_prompt}"\n\n'
-            f"The correct function is: fn_"
+            f"The correct function is: {prefix}"
         )
 
     def build_parameter_prompt(
