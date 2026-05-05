@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+from typing import Any
+
 from src.models import FunctionDefinition
 
 
@@ -43,20 +46,30 @@ class BobThePrompter:
             f"The correct function is: {prefix}"
         )
 
-    def build_parameter_prompt(
+    def build_decode_prompt(
         self,
         user_prompt: str,
-        function_definition: FunctionDefinition,
-        parameter_name: str,
+        chosen_fn: FunctionDefinition,
     ) -> str:
-        parameter_spec = function_definition.parameters[parameter_name]
+        example_params: dict[str, Any] = {}
+        for param_name, param_def in chosen_fn.parameters.items():
+            if param_def.type in ("number", "integer"):
+                example_params[param_name] = 5.0
+            elif param_def.type == "boolean":
+                example_params[param_name] = True
+            elif param_def.type == "object":
+                example_params[param_name] = {}
+            else:
+                example_params[param_name] = param_name
+
+        example = json.dumps(
+            {"name": chosen_fn.name, "parameters": example_params},
+            ensure_ascii=False,
+        )
         return (
-            "You are strict JSON value extractor for function calling.\n"
-            "Return only JSON literal value for requested parameter.\n\n"
-            f"User prompt:\n{user_prompt}\n\n"
-            f"Function name: {function_definition.name}\n"
-            f"Function description: {function_definition.description}\n"
-            f"Parameter: {parameter_name}\n"
-            f"Expected JSON type: {parameter_spec.type}\n\n"
-            "JSON literal:"
+            "You are parameters extraction assistant from text. "
+            "Extract only literal values from the request. "
+            f"Description: {chosen_fn.description}\n"
+            f"Example: {example}\n\n"
+            f"Task: {user_prompt}\n"
         )
