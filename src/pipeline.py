@@ -7,7 +7,10 @@ from typing import Any
 
 from llm_sdk import Small_LLM_Model  # type: ignore
 
-from src.constrained_decoder import ConstrainedDecoder
+from src.constrained_decoder import (
+    ConstrainedDecoder,
+    ConstrainedDecodingError,
+)
 from src.function_selector import (
     FunctionSelector,
     FunctionSelectorError,
@@ -17,7 +20,6 @@ from src.io_utils import (
     load_prompt_items,
     write_function_results,
 )
-from src.json_literal_validators import ConstrainedDecodingError
 from src.models import FunctionDefinition, FunctionResult
 from src.tokenizer_vocab import TokenizerVocab
 
