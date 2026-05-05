@@ -1,4 +1,5 @@
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -24,10 +25,8 @@ class FakePipelineModel:
         text = "".join(chr(token_id) for token_id in input_ids)
         if "JSON literal:" not in text:
             logits = [-100.0] * 256
-            if "Request: \"" in text:
-                user_part = text.split("Request: \"", 1)[1].split(
-                    "\"", 1
-                )[0]
+            if 'Request: "' in text:
+                user_part = text.split('Request: "', 1)[1].split('"', 1)[0]
                 if "sum" in user_part.lower():
                     logits[ord("a")] = 10.0
                     logits[ord("g")] = 1.0
@@ -85,6 +84,8 @@ class GoldenPipelineModel:
 
     def get_logits_from_input_ids(self, input_ids: list[int]) -> list[float]:
         text = "".join(chr(token_id) for token_id in input_ids)
+        if "You are parameters extraction assistant from text" in text:
+            return self._assistant_decode_logits(text)
         if "JSON literal:" in text:
             target = self._parameter_target(text)
             generated = self._generated_parameter_suffix(text)
@@ -98,6 +99,73 @@ class GoldenPipelineModel:
         logits[ord(next_char)] = 1000.0
         return logits
 
+    def _task_user_prompt(self, text: str) -> str:
+        marker = "Task: "
+        pos = text.find(marker)
+        if pos < 0:
+            raise ValueError("decode prompt missing Task line")
+        rest = text[pos + len(marker) :]
+        return rest.split("\n", 1)[0].strip()
+
+    def _assistant_decode_logits(self, text: str) -> list[float]:
+        user = self._task_user_prompt(text)
+        if user != getattr(self, "_golden_assistant_user", None):
+            self._golden_assistant_user = user
+            self._golden_bool_wave = 0
+
+        row = self._expected_by_prompt[user]
+        params = row["parameters"]
+        if not isinstance(params, dict):
+            raise TypeError("Expected parameter mapping")
+
+        def emit(ch: str) -> list[float]:
+            out = [-1000.0] * 256
+            out[ord(ch)] = 1000.0
+            return out
+
+        for pname, val in params.items():
+            if not isinstance(val, str):
+                continue
+            m = re.search(rf'"{re.escape(pname)}": "([^"]*)$', text)
+            if not m:
+                continue
+            partial = m.group(1)
+            if len(partial) < len(val):
+                return emit(val[len(partial)])
+
+        for pname, val in params.items():
+            if isinstance(val, bool) or isinstance(val, str):
+                continue
+            if isinstance(val, (int, float)):
+                target = json.dumps(val, separators=(",", ":"))
+                m = re.search(
+                    rf'"{re.escape(pname)}":\s*([0-9.eE+-]*)$',
+                    text,
+                )
+                if not m:
+                    continue
+                partial = m.group(1)
+                if len(partial) < len(target):
+                    return emit(target[len(partial)])
+
+        for pname in params:
+            val = params[pname]
+            if not isinstance(val, bool):
+                continue
+            needle = f'"{pname}": '
+            if needle not in text:
+                continue
+            suf = text.rsplit(needle, 1)[-1]
+            if suf == "":
+                wave = getattr(self, "_golden_bool_wave", 0)
+                self._golden_bool_wave = wave + 1
+                return emit("t" if wave % 2 == 0 else "f")
+            for word in ("true", "false"):
+                if word.startswith(suf) and suf != word:
+                    return emit(word[len(suf)])
+
+        return [-1000.0] * 256
+
     def get_path_to_tokenizer_file(self) -> str:
         return str(self._tokenizer_path)
 
@@ -105,7 +173,7 @@ class GoldenPipelineModel:
         return str(self._vocab_path)
 
     def _selection_target(self, text: str) -> str:
-        prompt = _between(text, "Request: \"", "\"\n\nThe correct function is:")
+        prompt = _between(text, 'Request: "', '"\n\nThe correct function is:')
         item = self._expected_by_prompt[prompt]
         full = str(item["name"])
         skip = len(self._name_prefix)

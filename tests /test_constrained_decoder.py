@@ -1,5 +1,7 @@
 from typing import cast
 
+import re
+
 from llm_sdk import Small_LLM_Model  # type: ignore
 
 from src.constrained_decoder import ConstrainedDecoder
@@ -8,6 +10,8 @@ from src.tokenizer_vocab import TokenizerVocab
 
 
 class FakeDecoderModel:
+    """Tiny LM: ascii tokens only; drives logits from decoded prefix."""
+
     def encode(self, text: str) -> list[list[int]]:
         return [[ord(ch) for ch in text]]
 
@@ -17,46 +21,51 @@ class FakeDecoderModel:
         raise TypeError("Expected list[int]")
 
     def get_logits_from_input_ids(self, input_ids: list[int]) -> list[float]:
-        text = "".join(chr(token_id) for token_id in input_ids)
-        marker = "JSON literal:"
-        marker_pos = text.rfind(marker)
-        generated = "" if marker_pos < 0 else text[marker_pos + len(marker) :]
+        text = "".join(chr(i) for i in input_ids if 0 <= i < 256)
 
-        if "Function name: fn_add_numbers" in text:
-            if "Parameter: a" in text:
-                target = "2"
-            elif "Parameter: b" in text:
-                target = "3"
-            else:
-                target = "{}"
-        elif (
-            "Function name: fn_reverse_string" in text
-            and "Parameter: s" in text
-        ):
-            target = '"hello"'
-        elif "Function name: fn_substitute_string_with_regex" in text:
-            if "Parameter: source_string" in text:
-                target = '"A with B 12"'
-            elif "Parameter: regex" in text:
-                target = '"\\\\d+"'
-            elif "Parameter: replacement" in text:
-                target = '"NUMBERS"'
-            else:
-                target = "{}"
-        elif "Parameter: a" in text:
-            target = "12.5"
-        elif "Parameter: name" in text:
-            target = '"Ada"'
-        elif "Parameter: enabled" in text:
-            target = "true"
-        else:
-            target = "{}"
-
-        next_char = (
-            target[len(generated)] if len(generated) < len(target) else " "
-        )
         logits = [-1000.0] * 256
-        logits[ord(next_char)] = 1000.0
+
+        def emit(ch: str) -> list[float]:
+            out = [-1000.0] * 256
+            out[ord(ch)] = 1000.0
+            return out
+
+        if "fn_demo" in text:
+            m = re.search(r'"a":\s*([0-9.]*)$', text)
+            if m:
+                target = "12.5"
+                partial = m.group(1)
+                if len(partial) < len(target):
+                    return emit(target[len(partial)])
+            m = re.search(r'"name": "([^"]*)$', text)
+            if m:
+                target = "Ada"
+                partial = m.group(1)
+                if len(partial) < len(target):
+                    return emit(target[len(partial)])
+            if '"enabled": ' in text:
+                suf = text.rsplit('"enabled": ', 1)[-1]
+                if suf == "":
+                    self._n_empty = getattr(self, "_n_empty", 0) + 1
+                    return emit("t" if self._n_empty == 1 else "f")
+                for word in ("true", "false"):
+                    if word.startswith(suf) and suf != word:
+                        return emit(word[len(suf)])
+
+        if "fn_add_numbers" in text:
+            return logits
+
+        if "fn_reverse_string" in text:
+            return logits
+
+        if "fn_substitute_string_with_regex" in text:
+            m = re.search(r'"replacement": "([^"]*)$', text)
+            if m:
+                target = "NUMBERS"
+                partial = m.group(1)
+                if len(partial) < len(target):
+                    return emit(target[len(partial)])
+
         return logits
 
     def get_path_to_tokenizer_file(self) -> str:
