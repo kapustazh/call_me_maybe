@@ -19,14 +19,14 @@
     "prompt": "Greet shrek",
     "name": "fn_get_square_root",
     "parameters": {
-      "a": 1
+      "a": 5.0
     }
   },
   {
     "prompt": "Greet john",
     "name": "fn_get_square_root",
     "parameters": {
-      "a": 1
+      "a": 5.0
     }
   },
   {
@@ -69,7 +69,7 @@
     "name": "fn_substitute_string_with_regex",
     "parameters": {
       "source_string": "Programming is fun",
-      "regex": "[AEIOUaeiou]",
+      "regex": "[aeiouAEIOU]",
       "replacement": "*"
     }
   },
