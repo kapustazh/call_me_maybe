@@ -102,6 +102,33 @@ def test_decodes_typed_parameters() -> None:
     assert parameters == {"a": 12.5, "name": "Ada", "enabled": True}
 
 
+def test_numeric_extraction_prefers_outside_quotes() -> None:
+    model = cast(Small_LLM_Model, FakeDecoderModel())
+    token_map = {chr(code): code for code in range(32, 127)}
+    vocab = TokenizerVocab(token_map, model=model)
+    function_definition = FunctionDefinition(
+        name="fn_demo",
+        description="Demo fn",
+        parameters={
+            "name": FunctionParameter(type="string"),
+            "a": FunctionParameter(type="number"),
+        },
+        returns=FunctionParameter(type="object"),
+    )
+    decoder = ConstrainedDecoder(
+        model=model,
+        tokenizer_vocab=vocab,
+        functions=[function_definition],
+    )
+
+    parameters = decoder.decode_parameters(
+        'Use value "room 404" and number 12',
+        function_definition,
+    )
+
+    assert parameters == {"name": "room 404", "a": 12.0}
+
+
 def test_extracts_sum_numbers_from_prompt() -> None:
     model = cast(Small_LLM_Model, FakeDecoderModel())
     token_map = {chr(code): code for code in range(32, 127)}
@@ -151,6 +178,27 @@ def test_extracts_reverse_string_from_prompt() -> None:
     )
 
     assert parameters == {"s": "hello"}
+
+
+def test_extracts_plain_string_without_quotes() -> None:
+    model = cast(Small_LLM_Model, FakeDecoderModel())
+    token_map = {chr(code): code for code in range(32, 127)}
+    vocab = TokenizerVocab(token_map, model=model)
+    function_definition = FunctionDefinition(
+        name="fn_greet",
+        description="Generate a greeting message for a person by name.",
+        parameters={"name": FunctionParameter(type="string")},
+        returns=FunctionParameter(type="string"),
+    )
+    decoder = ConstrainedDecoder(
+        model=model,
+        tokenizer_vocab=vocab,
+        functions=[function_definition],
+    )
+
+    parameters = decoder.decode_parameters("Greet john", function_definition)
+
+    assert parameters == {"name": "john"}
 
 
 def test_extracts_regex_replacement_with_inner_with() -> None:

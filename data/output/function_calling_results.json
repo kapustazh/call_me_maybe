@@ -59,9 +59,11 @@
   },
   {
     "prompt": "Replace all numbers in \"Hello 34 I'm 233 years old\" with NUMBERS",
-    "name": "fn_get_square_root",
+    "name": "fn_substitute_string_with_regex",
     "parameters": {
-      "a": 34.0
+      "source_string": "Hello 34 I'm 233 years old",
+      "regex": "\\d+",
+      "replacement": "NUMBERS"
     }
   },
   {

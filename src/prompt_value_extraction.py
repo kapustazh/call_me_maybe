@@ -98,6 +98,39 @@ def symbol_from_keywords(prompt: str) -> str | None:
     return None
 
 
+def plain_text_tail(prompt: str) -> str | None:
+    if not prompt.strip():
+        return None
+    if re.search(r"['\"]", prompt):
+        return None
+    if re.search(r"([A-Za-z]:\\[^\s'\"]+|/[^\s'\"]+)", prompt):
+        return None
+
+    words = re.findall(r"[A-Za-z][\w-]*", prompt)
+    if not words:
+        return None
+
+    lead_words = {
+        "greet",
+        "reverse",
+        "replace",
+        "substitute",
+        "read",
+        "execute",
+        "run",
+        "calculate",
+        "format",
+        "use",
+    }
+    if words[0].lower() in lead_words and len(words) == 2:
+        return words[1].strip() or None
+
+    if len(words) <= 2:
+        return " ".join(words).strip()
+
+    return None
+
+
 def try_non_regex_string(
     prompt: str,
     string_param_index: int,
@@ -134,6 +167,11 @@ def try_non_regex_string(
     if m:
         return m.group(1).strip()
 
+    if string_param_index == 0:
+        plain = plain_text_tail(prompt)
+        if plain is not None:
+            return plain
+
     return symbol_from_keywords(prompt)
 
 
@@ -150,11 +188,27 @@ def regex_pattern_from_prompt(prompt: str) -> str | None:
 
 
 def ordered_numeric_strings(prompt: str) -> list[str]:
-    hits: list[tuple[int, str]] = []
+    hits_outside_quotes: list[tuple[int, str]] = []
+    hits_inside_quotes: list[tuple[int, str]] = []
+    quoted_spans = [
+        match.span() for match in re.finditer(r"'[^']*'|\"[^\"]*\"", prompt)
+    ]
+
+    def _inside_quotes(index: int) -> bool:
+        return any(start <= index < end for start, end in quoted_spans)
+
     for m in _DIGIT_NUMBER_RE.finditer(prompt):
-        hits.append((m.start(), m.group()))
+        target = (
+            hits_inside_quotes if _inside_quotes(m.start()) else hits_outside_quotes
+        )
+        target.append((m.start(), m.group()))
     for m in _WORD_NUMBER_RE.finditer(prompt):
-        hits.append((m.start(), _WORD_NUMBERS[m.group().lower()]))
+        target = (
+            hits_inside_quotes if _inside_quotes(m.start()) else hits_outside_quotes
+        )
+        target.append((m.start(), _WORD_NUMBERS[m.group().lower()]))
+
+    hits = hits_outside_quotes if hits_outside_quotes else hits_inside_quotes
     hits.sort(key=lambda h: h[0])
     return [v for _, v in hits]
 

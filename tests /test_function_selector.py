@@ -29,6 +29,10 @@ class FakeSelectorModel:
             logits[ord("a")] = 1.0
             logits[ord("g")] = 10.0
             return logits
+        if self._mode == "prefer_square_small" and "greet" in text:
+            logits[ord("a")] = 1.2
+            logits[ord("g")] = 1.0
+            return logits
         if self._mode == "biased_add":
             logits[ord("a")] = 10.0
             logits[ord("g")] = 1.0
@@ -94,6 +98,16 @@ def test_model_selection_when_logits_favor_add() -> None:
     )
     selected = selector.select("Greet john")
     assert selected == "fn_add_numbers"
+
+
+def test_lexical_prior_can_override_small_logit_bias() -> None:
+    selector = FunctionSelector(
+        cast(Small_LLM_Model, FakeSelectorModel(mode="prefer_square_small")),
+        _definitions(),
+        confidence_threshold=0.60,
+    )
+    selected = selector.select("Greet john")
+    assert selected == "fn_greet"
 
 
 def test_single_function_does_not_crash() -> None:

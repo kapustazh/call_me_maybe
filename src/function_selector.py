@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import re
 from collections import defaultdict
 from dataclasses import dataclass
 
@@ -11,9 +12,37 @@ from src.math_utils import softmax
 from src.models import FunctionDefinition
 from src.prompt import BobThePrompter
 
-_UNIFORM_MULTIPLIER = 3.0
+# For N=5 candidates, 4.5/N == 0.90 (matches docstring of adaptive_threshold).
+_UNIFORM_MULTIPLIER = 4.5
 _TARGET_TOP_SOFTMAX_PROB = 0.9
 _TEMPERATURE_SCHEDULE = (1.0, 0.7, 0.5, 0.35, 0.25, 0.15, 0.1, 0.05)
+_LEXICAL_BONUS_WEIGHT = 4.0
+_WORD_RE = re.compile(r"[a-z0-9]+")
+_STOPWORDS = {
+    "a",
+    "an",
+    "and",
+    "are",
+    "be",
+    "by",
+    "for",
+    "from",
+    "has",
+    "how",
+    "i",
+    "in",
+    "is",
+    "it",
+    "of",
+    "on",
+    "or",
+    "please",
+    "the",
+    "to",
+    "what",
+    "with",
+    "you",
+}
 
 
 class FunctionSelectorError(Exception):
@@ -101,6 +130,32 @@ class FunctionSelector:
         return candidates
 
     @staticmethod
+    def _normalize_terms(text: str) -> set[str]:
+        terms = set(_WORD_RE.findall(text.lower().replace("_", " ")))
+        return {
+            term for term in terms if term not in _STOPWORDS and term != "fn"
+        }
+
+    def _lexical_bonus(
+        self,
+        user_prompt: str,
+        function_definition: FunctionDefinition,
+    ) -> float:
+        prompt_terms = self._normalize_terms(user_prompt)
+        if not prompt_terms:
+            return 0.0
+
+        function_text = (
+            f"{function_definition.name} {function_definition.description}"
+        )
+        function_terms = self._normalize_terms(function_text)
+        overlap = prompt_terms & function_terms
+        if not overlap:
+            return 0.0
+
+        return float(len(overlap)) * _LEXICAL_BONUS_WEIGHT
+
+    @staticmethod
     def _best_index(probs: list[float]) -> int:
         if not probs:
             raise FunctionSelectorError("No function candidates")
@@ -142,17 +197,27 @@ class FunctionSelector:
             peak = max(probs)
         return probs
 
-    def _candidate_scores(self, base_ids: list[int]) -> list[float]:
+    def _candidate_scores(
+        self,
+        base_ids: list[int],
+        user_prompt: str,
+    ) -> list[float]:
         logits = self._model.get_logits_from_input_ids(base_ids)
         scores: list[float] = []
         groups: dict[int, list[int]] = defaultdict(list)
-        for candidate in self._candidates:
+        for candidate, function_definition in zip(
+            self._candidates,
+            self._functions,
+        ):
             first_token = candidate.distinguishing_ids[0]
             groups[first_token].append(len(scores))
             if first_token >= len(logits):
                 scores.append(-math.inf)
                 continue
-            scores.append(float(logits[first_token]))
+            scores.append(
+                float(logits[first_token])
+                + self._lexical_bonus(user_prompt, function_definition)
+            )
 
         for first_token, indices in groups.items():
             if len(indices) <= 1:
@@ -194,15 +259,20 @@ class FunctionSelector:
     def select(self, user_prompt: str) -> str:
         prompt = self._prompter.build_selection_prompt(user_prompt)
         base_ids = encoded_to_token_ids(self._model.encode(prompt))
-        scores = self._candidate_scores(base_ids)
+        scores = self._candidate_scores(base_ids, user_prompt)
         if not scores or all(
             math.isinf(score) and score < 0 for score in scores
         ):
             raise FunctionSelectorError(
                 "No valid function candidate from logits"
             )
-        model_probs = self._probs_with_peak_target(scores)
-        best_index = self._best_index(model_probs)
+
+        # Use true softmax probabilities for confidence gating.
+        # Temperature cooling (peak target) is only a selection heuristic.
+        confidence_probs = softmax(scores)
+
+        selection_probs = self._probs_with_peak_target(scores)
+        best_index = self._best_index(selection_probs)
         best_name = self._candidates[best_index].name
-        self._validate_confidence(model_probs, best_index, best_name)
+        self._validate_confidence(confidence_probs, best_index, best_name)
         return best_name
