@@ -25,6 +25,8 @@ from src.tokenizer_vocab import TokenizerVocab
 
 _WRIER_DELAY = 0.03
 
+_DEBUG_FILE = f"{__file__}_{time.time()}.txt"
+
 
 def _write_char_by_char(text: str, *, delay: float = _WRIER_DELAY) -> None:
     """Write text char-by-char to stdout for visual feedback."""
@@ -32,6 +34,8 @@ def _write_char_by_char(text: str, *, delay: float = _WRIER_DELAY) -> None:
         sys.stdout.write(c)
         sys.stdout.flush()
         time.sleep(delay)
+    with open(_DEBUG_FILE, "a") as f:
+        f.write(text + "\n")
 
 
 def _format_params(parameters: dict[str, Any]) -> str:

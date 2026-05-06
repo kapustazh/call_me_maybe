@@ -16,7 +16,7 @@ from src.prompt import BobThePrompter
 _UNIFORM_MULTIPLIER = 4.5
 _TARGET_TOP_SOFTMAX_PROB = 0.9
 _TEMPERATURE_SCHEDULE = (1.0, 0.7, 0.5, 0.35, 0.25, 0.15, 0.1, 0.05)
-_LEXICAL_BONUS_WEIGHT = 4.0
+_LEXICAL_BONUS_WEIGHT = 5.0
 _WORD_RE = re.compile(r"[a-z0-9]+")
 _STOPWORDS = {
     "a",

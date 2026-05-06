@@ -199,12 +199,16 @@ def ordered_numeric_strings(prompt: str) -> list[str]:
 
     for m in _DIGIT_NUMBER_RE.finditer(prompt):
         target = (
-            hits_inside_quotes if _inside_quotes(m.start()) else hits_outside_quotes
+            hits_inside_quotes
+            if _inside_quotes(m.start())
+            else hits_outside_quotes
         )
         target.append((m.start(), m.group()))
     for m in _WORD_NUMBER_RE.finditer(prompt):
         target = (
-            hits_inside_quotes if _inside_quotes(m.start()) else hits_outside_quotes
+            hits_inside_quotes
+            if _inside_quotes(m.start())
+            else hits_outside_quotes
         )
         target.append((m.start(), _WORD_NUMBERS[m.group().lower()]))
 
