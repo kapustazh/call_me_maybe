@@ -28,8 +28,17 @@ class BobThePrompter:
         self._functions = functions
 
     def function_name_prefix(self) -> str:
-        """Shared text prefix of all function names (character-level LCP)."""
+        """Shared prefix used in selection prompt.
+
+        Keep it tokenization-friendly for Qwen function names: all current
+        tools start with ``fn_...`` but continuation tokens are aligned after
+        ``fn`` (e.g. ``_add``, ``_get``), not after ``fn_``.
+        """
         names = [fn.name for fn in self._functions]
+        if not names:
+            return ""
+        if all(name.startswith("fn") for name in names):
+            return "fn"
         if len(names) <= 1:
             return ""
         return Prefix.longest_common_prefix(names)

@@ -231,3 +231,35 @@ def test_extracts_regex_replacement_with_inner_with() -> None:
         "regex": r"\d+",
         "replacement": "NUMBERS",
     }
+
+
+def test_extracts_explicit_regex_literal_pattern() -> None:
+    model = cast(Small_LLM_Model, FakeDecoderModel())
+    token_map = {chr(code): code for code in range(32, 127)}
+    vocab = TokenizerVocab(token_map, model=model)
+    function_definition = FunctionDefinition(
+        name="fn_substitute_string_with_regex",
+        description="Replace all occurrences matching a regex pattern in a string.",
+        parameters={
+            "source_string": FunctionParameter(type="string"),
+            "regex": FunctionParameter(type="string"),
+            "replacement": FunctionParameter(type="string"),
+        },
+        returns=FunctionParameter(type="string"),
+    )
+    decoder = ConstrainedDecoder(
+        model=model,
+        tokenizer_vocab=vocab,
+        functions=[function_definition],
+    )
+
+    parameters = decoder.decode_parameters(
+        r"Replace pattern '\d+' in 'A1 B2' with 'NUM'",
+        function_definition,
+    )
+
+    assert parameters == {
+        "source_string": "A1 B2",
+        "regex": r"\d+",
+        "replacement": "NUM",
+    }

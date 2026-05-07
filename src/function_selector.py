@@ -97,29 +97,39 @@ class FunctionSelector:
         self._candidates: list[_FunctionCandidate] = self._build_candidates()
 
     def _build_candidates(self) -> list[_FunctionCandidate]:
-        """Tokenize the character-level suffix after the shared name prefix.
-
-        Slicing *name* token ids by *len(prefix token ids)* is wrong: BPE
-        boundaries for ``prefix`` need not align with those for ``full name``.
-        """
+        """Tokenize token-level continuation after selection prompt prefix."""
         candidates: list[_FunctionCandidate] = []
         prefix = self._prompter.function_name_prefix()
-        prefix_len = len(prefix)
+        prefix_ids = (
+            encoded_to_token_ids(self._model.encode(prefix)) if prefix else []
+        )
         for function_definition in self._functions:
             name = function_definition.name
-            if prefix and name.startswith(prefix):
-                suffix = name[prefix_len:]
+            name_ids = encoded_to_token_ids(self._model.encode(name))
+            if prefix_ids:
+                if len(name_ids) <= len(prefix_ids):
+                    raise FunctionSelectorError(
+                        f"Function name {name!r} has no continuation "
+                        f"after prefix {prefix!r}"
+                    )
+                if name_ids[:len(prefix_ids)] != prefix_ids:
+                    raise FunctionSelectorError(
+                        "Selection prefix tokenization mismatch for "
+                        f"{name!r}: prefix {prefix!r} tokens do not match "
+                        "name-token prefix"
+                    )
+                distinguishing_ids = name_ids[len(prefix_ids):]
             else:
-                suffix = name
-            if not suffix:
-                suffix = name
-            distinguishing_ids = encoded_to_token_ids(
-                self._model.encode(suffix)
-            )
+                distinguishing_ids = name_ids
             if not distinguishing_ids:
                 raise FunctionSelectorError(
                     "Tokenizer produced no token ids for the selection "
-                    f"suffix of {name!r} (prefix {prefix!r})"
+                    f"continuation of {name!r} (prefix {prefix!r})"
+                )
+            if not name.startswith(prefix):
+                raise FunctionSelectorError(
+                    f"Function name {name!r} does not start with "
+                    f"selection prefix {prefix!r}"
                 )
             candidates.append(
                 _FunctionCandidate(

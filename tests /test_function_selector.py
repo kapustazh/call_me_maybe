@@ -48,6 +48,44 @@ class FakeSelectorModel:
         return "unused"
 
 
+class FakePrefixTokenModel:
+    def encode(self, text: str) -> list[list[int]]:
+        token_map: dict[str, list[int]] = {
+            "fn": [1],
+            "fn_add_numbers": [1, 2],
+            "add_numbers": [3],
+            "fn_get_square_root": [1, 4],
+            "get_square_root": [5],
+            "fn_greet": [1, 6],
+            "greet": [7],
+        }
+        if text in token_map:
+            return [token_map[text]]
+        return [[ord(ch) for ch in text]]
+
+    def decode(self, ids: list[int] | object) -> str:
+        if isinstance(ids, list):
+            return "".join(chr(token_id) for token_id in ids)
+        raise TypeError("Expected list[int]")
+
+    def get_logits_from_input_ids(self, input_ids: list[int]) -> list[float]:
+        text = "".join(chr(token_id) for token_id in input_ids).lower()
+        logits = [-100.0] * 256
+        if "sum" in text:
+            logits[2] = 10.0
+            logits[4] = 1.0
+            return logits
+        logits[2] = 1.0
+        logits[4] = 10.0
+        return logits
+
+    def get_path_to_tokenizer_file(self) -> str:
+        return "unused"
+
+    def get_path_to_vocab_file(self) -> str:
+        return "unused"
+
+
 def _definitions() -> list[FunctionDefinition]:
     number = FunctionParameter(type="number")
     return [
@@ -126,3 +164,12 @@ def test_single_function_does_not_crash() -> None:
         confidence_threshold=0.01,
     )
     assert selector.select("How long is hello?") == "fn_strlen"
+
+
+def test_prefix_token_continuation_uses_fn_boundary() -> None:
+    selector = FunctionSelector(
+        cast(Small_LLM_Model, FakePrefixTokenModel()),
+        _definitions(),
+        confidence_threshold=0.60,
+    )
+    assert selector.select("What is sum of 2 and 3?") == "fn_add_numbers"

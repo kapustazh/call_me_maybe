@@ -59,6 +59,7 @@ _REGEX_KEYWORDS: tuple[tuple[tuple[str, ...], str], ...] = (
     (("word", "alphanumeric"), r"\w+"),
     (("punctuation", "special char", "symbol"), r"[^\w\s]"),
 )
+_REGEX_META_CHAR_RE = re.compile(r"[\\\[\]\(\)\{\}\+\*\?\|\^\$\.]")
 
 
 def quoted_spans(prompt: str) -> list[str]:
@@ -177,9 +178,24 @@ def try_non_regex_string(
 
 def regex_pattern_from_prompt(prompt: str) -> str | None:
     text = prompt.lower()
-    mq = re.search(r"['\"](\w+)['\"]", prompt)
-    if mq:
-        return mq.group(1)
+    explicit = re.search(
+        r"(?:regex|pattern)\s+(?:is\s+)?['\"]([^'\"]+)['\"]",
+        prompt,
+        re.IGNORECASE,
+    )
+    if explicit:
+        return explicit.group(1)
+
+    quoted_values = quoted_spans(prompt)
+    for value in quoted_values:
+        if _REGEX_META_CHAR_RE.search(value):
+            return value
+    if "word" in text:
+        for value in quoted_values:
+            if value and " " not in value:
+                return value
+    if quoted_values and all(" " not in value for value in quoted_values):
+        return quoted_values[0]
 
     for keywords, pattern in _REGEX_KEYWORDS:
         if any(kw in text for kw in keywords):
@@ -239,12 +255,11 @@ def parse_numeric_at_index(
 
 
 def regex_candidate_patterns() -> list[str]:
-    return [
-        r"\d+",
-        r"[aeiouAEIOU]",
-        r"[A-Z]",
-        r"[a-z]",
-        r"\s+",
-        r"\w+",
-        r"[^\w\s]",
-    ]
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for _, pattern in _REGEX_KEYWORDS:
+        if pattern in seen:
+            continue
+        seen.add(pattern)
+        ordered.append(pattern)
+    return ordered
