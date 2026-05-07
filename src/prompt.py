@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+from typing import Any
+
 from src.models import FunctionDefinition
 
 
@@ -25,37 +28,57 @@ class BobThePrompter:
         self._functions = functions
 
     def function_name_prefix(self) -> str:
-        """Shared text prefix of all function names (character-level LCP)."""
-        return Prefix.longest_common_prefix(
-            [fn.name for fn in self._functions],
-        )
+        """Shared prefix used in selection prompt.
+
+        Keep it tokenization-friendly for Qwen function names: all current
+        tools start with ``fn_...`` but continuation tokens are aligned after
+        ``fn`` (e.g. ``_add``, ``_get``), not after ``fn_``.
+        """
+        names = [fn.name for fn in self._functions]
+        if not names:
+            return ""
+        if all(name.startswith("fn") for name in names):
+            return "fn"
+        if len(names) <= 1:
+            return ""
+        return Prefix.longest_common_prefix(names)
 
     def build_selection_prompt(self, user_prompt: str) -> str:
+        prefix = self.function_name_prefix()
         fn_lines = "\n".join(
             f"- {fn.name}: {fn.description}" for fn in self._functions
         )
-        _ = self.function_name_prefix()
         return (
             "Select the correct function name for the request.\n\n"
             f"Available functions:\n{fn_lines}\n\n"
             f'Request: "{user_prompt}"\n\n'
-            f"The correct function is: fn_"
+            f"The correct function is: {prefix}"
         )
 
-    def build_parameter_prompt(
+    def build_decode_prompt(
         self,
         user_prompt: str,
-        function_definition: FunctionDefinition,
-        parameter_name: str,
+        chosen_fn: FunctionDefinition,
     ) -> str:
-        parameter_spec = function_definition.parameters[parameter_name]
+        example_params: dict[str, Any] = {}
+        for param_name, param_def in chosen_fn.parameters.items():
+            if param_def.type in ("number", "integer"):
+                example_params[param_name] = 5.0
+            elif param_def.type == "boolean":
+                example_params[param_name] = True
+            elif param_def.type == "object":
+                example_params[param_name] = {}
+            else:
+                example_params[param_name] = param_name
+
+        example = json.dumps(
+            {"name": chosen_fn.name, "parameters": example_params},
+            ensure_ascii=False,
+        )
         return (
-            "You are strict JSON value extractor for function calling.\n"
-            "Return only JSON literal value for requested parameter.\n\n"
-            f"User prompt:\n{user_prompt}\n\n"
-            f"Function name: {function_definition.name}\n"
-            f"Function description: {function_definition.description}\n"
-            f"Parameter: {parameter_name}\n"
-            f"Expected JSON type: {parameter_spec.type}\n\n"
-            "JSON literal:"
+            "You are parameters extraction assistant from text. "
+            "Extract only literal values from the request. "
+            f"Description: {chosen_fn.description}\n"
+            f"Example: {example}\n\n"
+            f"Task: {user_prompt}\n"
         )

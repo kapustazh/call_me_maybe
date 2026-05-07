@@ -7,7 +7,10 @@ from typing import Any
 
 from llm_sdk import Small_LLM_Model  # type: ignore
 
-from src.constrained_decoder import ConstrainedDecoder
+from src.constrained_decoder import (
+    ConstrainedDecoder,
+    ConstrainedDecodingError,
+)
 from src.function_selector import (
     FunctionSelector,
     FunctionSelectorError,
@@ -17,11 +20,12 @@ from src.io_utils import (
     load_prompt_items,
     write_function_results,
 )
-from src.json_literal_validators import ConstrainedDecodingError
 from src.models import FunctionDefinition, FunctionResult
 from src.tokenizer_vocab import TokenizerVocab
 
 _WRIER_DELAY = 0.03
+
+_DEBUG_FILE = f"{__file__}_{time.time()}.txt"
 
 
 def _write_char_by_char(text: str, *, delay: float = _WRIER_DELAY) -> None:
@@ -30,6 +34,8 @@ def _write_char_by_char(text: str, *, delay: float = _WRIER_DELAY) -> None:
         sys.stdout.write(c)
         sys.stdout.flush()
         time.sleep(delay)
+    with open(_DEBUG_FILE, "a") as f:
+        f.write(text + "\n")
 
 
 def _format_params(parameters: dict[str, Any]) -> str:
@@ -45,12 +51,14 @@ class Pipeline:
         output_path: str,
         model_name: str = "",
         selection_confidence_threshold: float | None = None,
+        selection_peak_softmax_target: float | None = None,
     ) -> None:
         self.functions_path: str = functions_path
         self.input_path: str = input_path
         self.output_path: str = output_path
         self._model_name: str = model_name
         self._selection_confidence_threshold = selection_confidence_threshold
+        self._selection_peak_softmax_target = selection_peak_softmax_target
 
     @staticmethod
     def _deduplicate_definitions(
@@ -83,6 +91,10 @@ class Pipeline:
         if self._selection_confidence_threshold is not None:
             selector_kwargs["confidence_threshold"] = (
                 self._selection_confidence_threshold
+            )
+        if self._selection_peak_softmax_target is not None:
+            selector_kwargs["peak_softmax_target"] = (
+                self._selection_peak_softmax_target
             )
         selector = FunctionSelector(
             model,

@@ -1,3 +1,29 @@
+"""
+Call me maybe. Not just maybe, please, call me I miss you so much.
+           .               ,.
+          T."-._..---.._,-"/|
+          l|"-.  _.v._   (" |
+          [l /.'_ \\; _~"-.`-t
+          Y " _(o} _{o)._ ^.|
+          j  T  ,-<v>-.  T  ]
+          \\  l (//-^-\\ ) !  !
+           \\.\\.  "~"  ./  /c-..,__
+             ^r- .._ .- .-"  `- .  ~"--..
+              > \\.                      \\
+              ]   ^.                     \\
+              3  .  ">            .       Y
+ ,.__.--._   _j   \\ ~   .         ;       |
+(    ~"-._~"^.\\   ^.    ^._      I     .  l
+ "-._ ___ ~"-,_7    .Z-._   7"   Y      ;  \\        _
+    /"   "~-(r r  _/_--._~-/    /      /,.--^-._   / Y
+    "-._    '"~~~>-._~]>--^---./____,.^~        ^.^  !
+        ~--._    '   Y---.                        \\./
+             ~~--._  l_   )                        \
+                   ~-._~~~---._,____..---           \
+                       ~----"~       \
+                                      \
+"""
+
 import argparse
 from argparse import ArgumentParser, Namespace
 
@@ -32,7 +58,20 @@ def main() -> None:
         "--threshold",
         type=float,
         default=None,
-        help="Selection confidence threshold (default: adaptive 2/N)",
+        help=(
+            "Selection confidence threshold "
+            "(default: adaptive min(3/N, 0.9))"
+        ),
+    )
+    _ = parser.add_argument(
+        "--selection-peak-target",
+        type=float,
+        default=None,
+        metavar="P",
+        help=(
+            "Anneal softmax temperature until the top candidate reaches "
+            "mass P (default: 0.9; use P>=1.0 to disable annealing)"
+        ),
     )
     args: Namespace = parser.parse_args()
     try:
@@ -41,6 +80,7 @@ def main() -> None:
             args.input,
             args.output,
             selection_confidence_threshold=args.threshold,
+            selection_peak_softmax_target=args.selection_peak_target,
         )
         pipeline.run()
     except (

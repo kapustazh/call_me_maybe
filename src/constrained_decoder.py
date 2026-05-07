@@ -1,438 +1,395 @@
 from __future__ import annotations
 
 import math
-import re
+from typing import Any
+
+import numpy as np
+import numpy.typing as npt
 
 from llm_sdk import Small_LLM_Model  # type: ignore
 
-from src.json_literal_validators import (
-    BooleanValidator,
-    ConstrainedDecodingError,
-    EmptyObjectValidator,
-    LiteralValidator,
-    NumberValidator,
-    StringValidator,
-)
 from src.model_utils import encoded_to_token_ids
 from src.models import FunctionDefinition
 from src.prompt import BobThePrompter
+from src import prompt_value_extraction as pvex
 from src.tokenizer_vocab import TokenizerVocab
 
 
+class ConstrainedDecodingError(RuntimeError):
+    """Raised when constrained decoding cannot produce a valid value."""
+
+
 class ConstrainedDecoder:
-    _DEFAULT_MAX_NEW_TOKENS = 120
+    _DEFAULT_MAX_NEW_TOKENS_STRING = 50
+    _DEFAULT_MAX_NEW_TOKENS_NUMBER = 15
 
     def __init__(
         self,
         model: Small_LLM_Model,
         tokenizer_vocab: TokenizerVocab,
         functions: list[FunctionDefinition],
-        max_new_tokens: int = _DEFAULT_MAX_NEW_TOKENS,
+        max_new_tokens_string: int = _DEFAULT_MAX_NEW_TOKENS_STRING,
+        max_new_tokens_number: int = _DEFAULT_MAX_NEW_TOKENS_NUMBER,
     ) -> None:
         self._model: Small_LLM_Model = model
-        self._max_new_tokens: int = max_new_tokens
+        self._max_new_tokens_string: int = max_new_tokens_string
+        self._max_new_tokens_number: int = max_new_tokens_number
         self._prompter: BobThePrompter = BobThePrompter(functions)
+
         self._piece_by_id: dict[int, str] = tokenizer_vocab.id_to_text_map()
 
-        self._validators: dict[str, LiteralValidator] = {
-            "string": StringValidator(),
-            "number": NumberValidator(integer_only=False),
-            "integer": NumberValidator(integer_only=True),
-            "boolean": BooleanValidator(),
-            "object": EmptyObjectValidator(),
-        }
-        self._candidate_pool_by_type: dict[str, tuple[int, ...]] = {
-            value_type: self._collect_pool(validator)
-            for value_type, validator in self._validators.items()
-        }
+        quote_ids = encoded_to_token_ids(self._model.encode('"'))
+        if not quote_ids:
+            raise ConstrainedDecodingError(
+                "Tokenizer produced no ids for double-quote token"
+            )
+        self._closing_quote_id: int = quote_ids[0]
+
+        self._true_ids: list[int] = encoded_to_token_ids(
+            self._model.encode("true")
+        )
+        self._false_ids: list[int] = encoded_to_token_ids(
+            self._model.encode("false")
+        )
+
+        self._valid_number_ids_arr: npt.NDArray[np.int32] = np.array(
+            list(self._build_valid_number_ids()),
+            dtype=np.int32,
+        )
+        self._safe_string_ids_arr: npt.NDArray[np.int32] = np.array(
+            list(self._build_safe_string_ids()),
+            dtype=np.int32,
+        )
 
     def decode_parameters(
         self,
         user_prompt: str,
         function_definition: FunctionDefinition,
     ) -> dict[str, object]:
-        out: dict[str, object] = {}
-        numeric_param_names = [
-            name
-            for name, spec in function_definition.parameters.items()
-            if spec.type in {"number", "integer"}
-        ]
-        for (
-            parameter_name,
-            parameter_spec,
-        ) in function_definition.parameters.items():
-            parameter_type = parameter_spec.type
-
-            if parameter_type == "string":
-                fallback = self._prompt_string_fallback(
-                    user_prompt=user_prompt,
-                    parameter_name=parameter_name,
-                )
-                if fallback is not None:
-                    out[parameter_name] = fallback
-                    continue
-
-            if parameter_type in {"number", "integer"}:
-                fallback_number = self._prompt_number_fallback(
-                    user_prompt=user_prompt,
-                    parameter_name=parameter_name,
-                    numeric_param_names=numeric_param_names,
-                    integer_only=(parameter_type == "integer"),
-                )
-                if fallback_number is not None:
-                    out[parameter_name] = fallback_number
-                    continue
-
-            prompt = self._prompter.build_parameter_prompt(
-                user_prompt,
-                function_definition,
-                parameter_name,
-            )
-            raw_literal = self._decode_literal(
-                prompt=prompt,
-                value_type=parameter_type,
-                parameter_name=parameter_name,
-            )
-            validator = self._validators[parameter_type]
-            parsed_value = validator.parse_value(raw_literal)
-            out[parameter_name] = parsed_value
-        return out
-
-    def _decode_literal(
-        self,
-        *,
-        prompt: str,
-        value_type: str,
-        parameter_name: str,
-    ) -> str:
-        context_ids = encoded_to_token_ids(self._model.encode(prompt))
-        generated_ids: list[int] = []
-        generated_text = ""
-
-        validator: LiteralValidator = self._validators[value_type]
-        candidate_pool = self._candidate_pool_by_type[value_type]
-
-        for _ in range(self._max_new_tokens):
-            logits = self._model.get_logits_from_input_ids(
-                context_ids + generated_ids
-            )
-            allowed_ids = self._allowed_ids(
-                generated_text,
-                candidate_pool,
-                validator,
-            )
-            if not allowed_ids:
-                raise ConstrainedDecodingError(
-                    f"No allowed tokens left for '{parameter_name}' "
-                    f"({value_type}) with prefix {generated_text!r}"
-                )
-
-            token_id: int = self._select_best_token(logits, allowed_ids)
-            generated_ids.append(token_id)
-            piece: str = self._piece_by_id[token_id]
-            generated_text += piece
-
-            if validator.is_complete(generated_text):
-                if self._should_stop(
-                    context_ids=context_ids,
-                    generated_ids=generated_ids,
-                    generated_text=generated_text,
-                    candidate_pool=candidate_pool,
-                    validator=validator,
-                ):
-                    return generated_text
-
-            forced_literal: str | None = self._force_complete_string(
-                value_type=value_type,
-                generated_text=generated_text,
-                validator=validator,
-            )
-            if forced_literal is not None:
-                return forced_literal
-
-        forced_literal = self._force_complete_string(
-            value_type=value_type,
-            generated_text=generated_text,
-            validator=validator,
+        decode_prompt = self._prompter.build_decode_prompt(
+            user_prompt,
+            function_definition,
         )
-        if forced_literal is not None:
-            return forced_literal
-        raise ConstrainedDecodingError(
-            "Max tokens reached while decoding "
-            f"'{parameter_name}' ({value_type})"
+        input_ids = encoded_to_token_ids(self._model.encode(decode_prompt))
+        result = self._decode_full_call(
+            input_ids,
+            function_definition,
+            prompt_text=user_prompt,
         )
+        return dict(result["parameters"])
 
-    def _allowed_ids(
-        self,
-        current_text: str,
-        candidate_pool: tuple[int, ...],
-        validator: LiteralValidator,
-    ) -> list[int]:
-        allowed: list[int] = []
-        for token_id in candidate_pool:
-            piece = self._piece_by_id[token_id]
-            if piece == "":
-                continue
-            candidate = current_text + piece
-            if validator.is_valid_prefix(candidate):
-                allowed.append(token_id)
-        return allowed
-
-    def _should_stop(
-        self,
-        *,
-        context_ids: list[int],
-        generated_ids: list[int],
-        generated_text: str,
-        candidate_pool: tuple[int, ...],
-        validator: LiteralValidator,
-    ) -> bool:
-        next_allowed = self._allowed_ids(
-            generated_text,
-            candidate_pool,
-            validator,
-        )
-        if not next_allowed:
-            return True
-        next_logits = self._model.get_logits_from_input_ids(
-            context_ids + generated_ids
-        )
-        best_next = max(range(len(next_logits)), key=next_logits.__getitem__)
-        return best_next not in next_allowed
-
-    @staticmethod
-    def _select_best_token(logits: list[float], allowed_ids: list[int]) -> int:
-        best_id = -1
-        best_logit = -math.inf
-        for token_id in allowed_ids:
-            if token_id >= len(logits):
-                continue
-            score = logits[token_id]
-            if score > best_logit:
-                best_logit = score
-                best_id = token_id
-        if best_id < 0:
-            raise ConstrainedDecodingError("Allowed set has no logits overlap")
-        return best_id
-
-    def _collect_pool(
-        self,
-        validator: LiteralValidator,
-    ) -> tuple[int, ...]:
-        out = [
+    def _build_safe_string_ids(self) -> set[int]:
+        forbidden = {'"', "\n", "\r"}
+        ids = {
             token_id
             for token_id, piece in self._piece_by_id.items()
-            if validator.allows_token_piece(piece)
-        ]
-        return tuple(sorted(out))
+            if piece != "" and not any(c in piece for c in forbidden)
+        }
+        ids.add(self._closing_quote_id)
+        return ids
 
-    def _force_complete_string(
+    def _build_valid_number_ids(self) -> set[int]:
+        valid_chars = set("0123456789.-")
+        out: set[int] = set()
+        for token_id, piece in self._piece_by_id.items():
+            stripped = piece.strip()
+            if not stripped:
+                continue
+            if all(c in valid_chars for c in stripped):
+                out.add(token_id)
+        return out
+
+    def _decode_full_call(
+        self,
+        input_ids: list[int],
+        chosen_function: FunctionDefinition,
+        *,
+        prompt_text: str,
+    ) -> dict[str, Any]:
+        self._last_regex_value: str | None = None
+
+        current_ids = list(input_ids)
+        parameters: dict[str, Any] = {}
+
+        param_names = list(chosen_function.parameters.keys())
+        string_params = [
+            p
+            for p in param_names
+            if chosen_function.parameters[p].type == "string"
+        ]
+        regex_string_params = {
+            p for p in string_params if pvex.is_regex_like_param_name(p)
+        }
+        if (
+            not regex_string_params
+            and pvex.prompt_requests_regex(prompt_text)
+            and len(string_params) >= 3
+        ):
+            regex_string_params.add(string_params[1])
+        string_params_plain = [
+            p for p in string_params if p not in regex_string_params
+        ]
+        numeric_params = [
+            p
+            for p in param_names
+            if chosen_function.parameters[p].type in ("number", "integer")
+        ]
+
+        current_ids = self._force(current_ids, chosen_function.name)
+        current_ids = self._force(current_ids, '", "parameters": {')
+
+        param_items = list(chosen_function.parameters.items())
+        for i, (param_name, param_def) in enumerate(param_items):
+            is_last = i == len(param_items) - 1
+            current_ids = self._force(current_ids, f'"{param_name}": ')
+
+            value, current_ids = self._generate_value(
+                current_ids=current_ids,
+                param_type=param_def.type,
+                is_regex_string=(param_name in regex_string_params),
+                prompt_text=prompt_text,
+                string_plain_index=(
+                    string_params_plain.index(param_name)
+                    if param_name in string_params_plain
+                    else -1
+                ),
+                numeric_index=(
+                    numeric_params.index(param_name)
+                    if param_name in numeric_params
+                    else -1
+                ),
+                integer_only=(param_def.type == "integer"),
+            )
+            parameters[param_name] = value
+
+            if not is_last:
+                current_ids = self._force(current_ids, ", ")
+
+        current_ids = self._force(current_ids, "}}")
+
+        return {
+            "name": chosen_function.name,
+            "parameters": parameters,
+        }
+
+    def _force(self, current_ids: list[int], text: str) -> list[int]:
+        frag = encoded_to_token_ids(self._model.encode(text))
+        return current_ids + frag
+
+    def _generate_value(
         self,
         *,
-        value_type: str,
-        generated_text: str,
-        validator: LiteralValidator,
-    ) -> str | None:
-        if value_type != "string":
-            return None
-        if len(generated_text) < self._max_new_tokens:
-            return None
-        candidate = generated_text + '"'
-        if validator.is_complete(candidate):
-            return candidate
-        return None
+        current_ids: list[int],
+        param_type: str,
+        is_regex_string: bool,
+        prompt_text: str,
+        string_plain_index: int,
+        numeric_index: int,
+        integer_only: bool,
+    ) -> tuple[Any, list[int]]:
+        if param_type == "string":
+            if is_regex_string:
+                return self._generate_regex_value(current_ids, prompt_text)
+            return self._generate_string_value(
+                current_ids,
+                prompt_text=prompt_text,
+                string_plain_index=string_plain_index,
+            )
+        if param_type in ("number", "integer"):
+            return self._generate_number_value(
+                current_ids,
+                param_type=param_type,
+                prompt_text=prompt_text,
+                numeric_index=numeric_index,
+                integer_only=integer_only,
+            )
+        if param_type == "boolean":
+            return self._generate_boolean_value(current_ids)
+        if param_type == "object":
+            current_ids = self._force(current_ids, "{}")
+            return {}, current_ids
+        return self._generate_string_value(
+            current_ids,
+            prompt_text=prompt_text,
+            string_plain_index=string_plain_index,
+        )
+
+    def _generate_string_value(
+        self,
+        current_ids: list[int],
+        *,
+        prompt_text: str,
+        string_plain_index: int,
+    ) -> tuple[str, list[int]]:
+        extracted = pvex.try_non_regex_string(
+            prompt_text,
+            string_plain_index,
+            self._last_regex_value,
+        )
+        if extracted is not None:
+            current_ids = self._force(current_ids, f'"{extracted}"')
+            return extracted, current_ids
+
+        current_ids = self._force(current_ids, '"')
+        value_chars = ""
+        for _ in range(self._max_new_tokens_string):
+            logits = self._model.get_logits_from_input_ids(current_ids)
+            masked = self._apply_mask(logits, self._safe_string_ids_arr)
+            next_id = int(np.argmax(masked))
+            current_ids.append(next_id)
+            if next_id == self._closing_quote_id:
+                break
+            piece = self._piece_by_id.get(next_id, "")
+            cleaned = (
+                piece.replace("Ġ", " ").replace("Ċ", "").replace("Äł", "")
+            )
+            value_chars += cleaned
+        inner = value_chars.strip().split("\\n")[0].strip()
+        return inner, current_ids
+
+    def _generate_number_value(
+        self,
+        current_ids: list[int],
+        param_type: str,
+        *,
+        prompt_text: str,
+        numeric_index: int,
+        integer_only: bool,
+    ) -> tuple[int | float, list[int]]:
+        if numeric_index >= 0:
+            parsed = pvex.parse_numeric_at_index(
+                prompt_text,
+                numeric_index,
+                integer_only=integer_only,
+            )
+            if parsed is not None:
+                fragment = (
+                    repr(parsed) if isinstance(parsed, float) else str(parsed)
+                )
+                current_ids = self._force(current_ids, fragment)
+                return parsed, current_ids
+
+        valid_chars = set("0123456789.-")
+        value_str = ""
+        for _ in range(self._max_new_tokens_number):
+            logits = self._model.get_logits_from_input_ids(current_ids)
+            masked = self._apply_mask(logits, self._valid_number_ids_arr)
+            finite = masked[np.isfinite(masked)]
+            if (
+                value_str
+                and finite.size > 0
+                and self._numeric_literal_complete(value_str, integer_only)
+                and float(np.max(finite) - np.min(finite)) < 1e-5
+            ):
+                break
+            next_id = int(np.argmax(masked))
+            next_piece = self._piece_by_id.get(next_id, "").strip()
+            if not next_piece or not all(c in valid_chars for c in next_piece):
+                break
+            value_str += next_piece
+            current_ids.append(next_id)
+
+        if not value_str:
+            return (0 if param_type == "integer" else 0.0), current_ids
+        try:
+            return (
+                int(float(value_str))
+                if param_type == "integer"
+                else float(value_str)
+            ), current_ids
+        except ValueError:
+            return 0.0, current_ids
 
     @staticmethod
-    def _extract_quoted_values(user_prompt: str) -> list[str]:
-        quoted = re.findall(r"'([^']*)'|\"([^\"]+)\"", user_prompt)
-        return [
-            single or double for single, double in quoted if single or double
-        ]
+    def _numeric_literal_complete(value_str: str, integer_only: bool) -> bool:
+        if not value_str:
+            return False
+        try:
+            if integer_only:
+                int(float(value_str))
+            else:
+                float(value_str)
+        except ValueError:
+            return False
+        return True
 
-    def _prompt_string_fallback(
+    def _generate_boolean_value(
         self,
-        *,
-        user_prompt: str,
-        parameter_name: str,
-    ) -> str | None:
-        values = self._extract_quoted_values(user_prompt)
-        lower_prompt = user_prompt.lower()
-        lower_param = parameter_name.lower()
+        current_ids: list[int],
+    ) -> tuple[bool, list[int]]:
+        true_score = self._score_word(current_ids, self._true_ids)
+        false_score = self._score_word(current_ids, self._false_ids)
 
-        if "regex" in lower_param:
-            if "numbers" in lower_prompt or "digits" in lower_prompt:
-                return r"\d+"
-            if "vowels" in lower_prompt:
-                return "[AEIOUaeiou]"
-            word_match = re.search(
-                r"\bword\s+['\"]([^'\"]+)['\"]",
-                user_prompt,
-                flags=re.IGNORECASE,
+        if true_score >= false_score:
+            current_ids = self._force(current_ids, "true")
+            return True, current_ids
+
+        current_ids = self._force(current_ids, "false")
+        return False, current_ids
+
+    def _score_word(
+        self,
+        base_ids: list[int],
+        word_ids: list[int],
+    ) -> float:
+        if not word_ids:
+            return -math.inf
+
+        temp_ids = list(base_ids)
+        total = 0.0
+
+        for token_id in word_ids:
+            logits = self._model.get_logits_from_input_ids(temp_ids)
+            logits_arr = np.array(logits, dtype=np.float32)
+            shifted = logits_arr - logits_arr.max()
+            log_probs = shifted - np.log(np.exp(shifted).sum())
+            total += (
+                float(log_probs[token_id])
+                if token_id < len(logits_arr)
+                else -math.inf
             )
-            if word_match:
-                return word_match.group(1)
-            if values:
-                return values[0]
-            return None
+            temp_ids.append(token_id)
 
-        if lower_param in {"s", "source_string"}:
-            if values:
-                return max(values, key=len)
-            return None
+        return total
 
-        if lower_param == "replacement":
-            quoted_with = re.search(
-                r"\bwith\s+['\"]([^'\"]+)['\"]",
-                user_prompt,
-                flags=re.IGNORECASE,
-            )
-            if quoted_with:
-                return quoted_with.group(1)
-            plain_with = re.findall(
-                r"\bwith\s+([A-Za-z*#._-]+)\b",
-                user_prompt,
-                flags=re.IGNORECASE,
-            )
-            if plain_with:
-                token: str = str(plain_with[-1])
-                if token.lower() in {"asterisk", "asterisks", "star", "stars"}:
-                    return "*"
-                return token
-            if len(values) >= 2:
-                return values[1]
-            if values:
-                return values[0]
-            return None
+    def _generate_regex_value(
+        self,
+        current_ids: list[int],
+        prompt_text: str,
+    ) -> tuple[str, list[int]]:
+        pattern = pvex.regex_pattern_from_prompt(prompt_text)
+        if pattern is not None:
+            self._last_regex_value = pattern
+            current_ids = self._force(current_ids, f'"{pattern}"')
+            return pattern, current_ids
 
-        if lower_param == "name":
-            with_match = re.search(
-                r"\bwith\s+([A-Za-z][A-Za-z0-9_-]*)",
-                user_prompt,
-                flags=re.IGNORECASE,
-            )
-            if with_match:
-                return with_match.group(1)
-            name_match = re.match(
-                r"(?:greet|say\s+hello\s+to|welcome)\s+(.+?)"
-                r"(?:\s*[.!?]?\s*$)",
-                user_prompt,
-                re.IGNORECASE,
-            )
-            if name_match:
-                return name_match.group(1).strip()
-            tokens = re.findall(r"[A-Za-z][A-Za-z0-9_-]*", user_prompt)
-            if tokens:
-                return str(tokens[-1])
-            return None
+        candidates = pvex.regex_candidate_patterns()
+        scoring_text = (
+            f'For the request "{prompt_text}", '
+            f"the correct regex pattern is: "
+        )
+        scoring_ids = encoded_to_token_ids(self._model.encode(scoring_text))
 
-        if lower_param == "template":
-            colon_match = re.search(r":\s*(.+)$", user_prompt)
-            if colon_match:
-                return colon_match.group(1).strip()
-            return None
+        best_candidate = candidates[0]
+        best_score = -math.inf
+        for candidate in candidates:
+            token_ids = encoded_to_token_ids(self._model.encode(candidate))
+            score = self._score_word(scoring_ids, token_ids)
+            if score > best_score:
+                best_score = score
+                best_candidate = candidate
 
-        if lower_param == "query":
-            if values:
-                return values[0]
-            return None
+        self._last_regex_value = best_candidate
+        current_ids = self._force(current_ids, f'"{best_candidate}"')
+        return best_candidate, current_ids
 
-        if lower_param == "database":
-            db_match = re.search(
-                r"\b(?:on\s+(?:the\s+)?)(\w+)\s+database\b",
-                user_prompt,
-                re.IGNORECASE,
-            )
-            if db_match:
-                return db_match.group(1)
-            return None
-
-        if lower_param == "path":
-            path_match = re.search(
-                r"([A-Za-z]:\\[^\s]+|/[^\s]+\.\w+)",
-                user_prompt,
-            )
-            if path_match:
-                return path_match.group(1)
-            return None
-
-        if lower_param == "encoding":
-            enc_match = re.search(
-                r"(\S*\w+-\d\w*|\w+\d\S*)\s+encoding\b",
-                user_prompt,
-                re.IGNORECASE,
-            )
-            if enc_match:
-                return enc_match.group(1)
-            enc_match = re.search(
-                r"\bencoding\s+(\S+)",
-                user_prompt,
-                re.IGNORECASE,
-            )
-            if enc_match:
-                return enc_match.group(1)
-            return None
-
-        if values:
-            return values[0]
-        return None
-
-    _DIGIT_NUMBER_RE = re.compile(r"[+-]?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?")
-    _WORD_NUMBERS: dict[str, str] = {
-        "zero": "0",
-        "one": "1",
-        "two": "2",
-        "three": "3",
-        "four": "4",
-        "five": "5",
-        "six": "6",
-        "seven": "7",
-        "eight": "8",
-        "nine": "9",
-        "ten": "10",
-        "eleven": "11",
-        "twelve": "12",
-    }
-    _WORD_NUMBER_RE = re.compile(
-        r"\b(" + "|".join(_WORD_NUMBERS) + r")\b",
-        re.IGNORECASE,
-    )
-
-    @classmethod
-    def _extract_numbers_from_prompt(cls, user_prompt: str) -> list[str]:
-        """Extract digit-based and word-based numbers in prompt order."""
-        hits: list[tuple[int, str]] = []
-        for m in cls._DIGIT_NUMBER_RE.finditer(user_prompt):
-            hits.append((m.start(), m.group()))
-        for m in cls._WORD_NUMBER_RE.finditer(user_prompt):
-            hits.append((m.start(), cls._WORD_NUMBERS[m.group().lower()]))
-        hits.sort(key=lambda h: h[0])
-        return [v for _, v in hits]
-
-    @classmethod
-    def _prompt_number_fallback(
-        cls,
-        *,
-        user_prompt: str,
-        parameter_name: str,
-        numeric_param_names: list[str],
-        integer_only: bool,
-    ) -> int | float | None:
-        matches = cls._extract_numbers_from_prompt(user_prompt)
-        if not matches:
-            return None
-        try:
-            param_index = numeric_param_names.index(parameter_name)
-        except ValueError:
-            return None
-        if param_index >= len(matches):
-            return None
-        value_text = matches[param_index]
-        if integer_only:
-            try:
-                return int(float(value_text))
-            except ValueError:
-                return None
-        try:
-            return float(value_text)
-        except ValueError:
-            return None
+    def _apply_mask(
+        self,
+        logits: list[float],
+        valid_ids_arr: npt.NDArray[np.int32],
+    ) -> npt.NDArray[np.float32]:
+        arr = np.full(len(logits), -np.inf, dtype=np.float32)
+        logits_arr = np.array(logits, dtype=np.float32)
+        valid_ids_arr = valid_ids_arr[valid_ids_arr < len(arr)]
+        arr[valid_ids_arr] = logits_arr[valid_ids_arr]
+        return arr
