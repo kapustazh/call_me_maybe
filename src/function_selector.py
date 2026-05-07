@@ -7,7 +7,6 @@ from dataclasses import dataclass
 
 
 from llm_sdk import Small_LLM_Model  # type: ignore
-import numpy as np
 from src.tokenizer_vocab import encoded_to_token_ids
 from src.math_utils import log_softmax
 from src.models import FunctionDefinition
@@ -89,24 +88,13 @@ class FunctionSelector:
         self,
         model: Small_LLM_Model,
         functions: list[FunctionDefinition],
-        *,
-        confidence_threshold: float | None = None,
-        peak_softmax_target: float | None = None,
     ) -> None:
         if not functions:
             raise ValueError("No functions provided for selection")
         self._model: Small_LLM_Model = model
         self._functions: list[FunctionDefinition] = functions
-        self._threshold: float = (
-            confidence_threshold
-            if confidence_threshold is not None
-            else adaptive_threshold(len(functions))
-        )
-        self._peak_target: float = (
-            peak_softmax_target
-            if peak_softmax_target is not None
-            else _TARGET_TOP_SOFTMAX_PROB
-        )
+        self._threshold: float = adaptive_threshold(len(functions))
+        self._peak_target: float = _TARGET_TOP_SOFTMAX_PROB
         self._prompter: BobThePrompter = BobThePrompter(functions)
         self._candidates: list[_FunctionCandidate] = self._build_candidates()
 
@@ -193,13 +181,6 @@ class FunctionSelector:
             return 0.0
 
         return float(overlap_count) * _LEXICAL_BONUS_WEIGHT
-
-    @staticmethod
-    def _best_index(probs: list[float]) -> int:
-        if not probs:
-            raise FunctionSelectorError("No function candidates")
-        best_index = np.argmax(probs)
-        return int(best_index)
 
     def _validate_confidence(
         self,
@@ -321,7 +302,7 @@ class FunctionSelector:
         confidence_probs = softmax(scores)
 
         selection_probs = self._probs_with_peak_target(scores)
-        best_index = self._best_index(selection_probs)
+        best_index = selection_probs.index(max(selection_probs))
         best_name = self._candidates[best_index].name
         best_overlap_count = self._lexical_overlap_count(
             user_prompt, self._functions[best_index]

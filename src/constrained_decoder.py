@@ -62,9 +62,9 @@ class ConstrainedDecoder:
             dtype=np.int32,
         )
 
-    def _force(self, current_ids: list[int], text: str) -> list[int]:
-        frag = encoded_to_token_ids(self._model.encode(text))
-        return current_ids + frag
+    def _insert_tokens(self, current_ids: list[int], text: str) -> list[int]:
+        text_token_ids = encoded_to_token_ids(self._model.encode(text))
+        return current_ids[:] + text_token_ids
 
     def decode_parameters(
         self,
@@ -140,13 +140,13 @@ class ConstrainedDecoder:
             if chosen_function.parameters[p].type in ("number", "integer")
         ]
 
-        current_ids = self._force(current_ids, chosen_function.name)
-        current_ids = self._force(current_ids, '", "parameters": {')
+        current_ids = self._insert_tokens(current_ids, chosen_function.name)
+        current_ids = self._insert_tokens(current_ids, '", "parameters": {')
 
         param_items = list(chosen_function.parameters.items())
         for i, (param_name, param_def) in enumerate(param_items):
             is_last = i == len(param_items) - 1
-            current_ids = self._force(current_ids, f'"{param_name}": ')
+            current_ids = self._insert_tokens(current_ids, f'"{param_name}": ')
 
             value, current_ids = self._generate_value(
                 current_ids=current_ids,
@@ -168,9 +168,9 @@ class ConstrainedDecoder:
             parameters[param_name] = value
 
             if not is_last:
-                current_ids = self._force(current_ids, ", ")
+                current_ids = self._insert_tokens(current_ids, ", ")
 
-        current_ids = self._force(current_ids, "}}")
+        current_ids = self._insert_tokens(current_ids, "}}")
 
         return {
             "name": chosen_function.name,
@@ -207,7 +207,7 @@ class ConstrainedDecoder:
         if param_type == "boolean":
             return self._generate_boolean_value(current_ids)
         if param_type == "object":
-            current_ids = self._force(current_ids, "{}")
+            current_ids = self._insert_tokens(current_ids, "{}")
             return {}, current_ids
         return self._generate_string_value(
             current_ids,
@@ -228,10 +228,10 @@ class ConstrainedDecoder:
             self._last_regex_value,
         )
         if extracted is not None:
-            current_ids = self._force(current_ids, f'"{extracted}"')
+            current_ids = self._insert_tokens(current_ids, f'"{extracted}"')
             return extracted, current_ids
 
-        current_ids = self._force(current_ids, '"')
+        current_ids = self._insert_tokens(current_ids, '"')
         value_chars = ""
         for _ in range(self._max_new_tokens_string):
             logits = self._model.get_logits_from_input_ids(current_ids)
@@ -268,7 +268,7 @@ class ConstrainedDecoder:
                 fragment = (
                     repr(parsed) if isinstance(parsed, float) else str(parsed)
                 )
-                current_ids = self._force(current_ids, fragment)
+                current_ids = self._insert_tokens(current_ids, fragment)
                 return parsed, current_ids
 
         valid_chars = set("0123456789.-")
@@ -318,10 +318,10 @@ class ConstrainedDecoder:
         false_score = self._score_word(current_ids, self._false_ids)
 
         if true_score >= false_score:
-            current_ids = self._force(current_ids, "true")
+            current_ids = self._insert_tokens(current_ids, "true")
             return True, current_ids
 
-        current_ids = self._force(current_ids, "false")
+        current_ids = self._insert_tokens(current_ids, "false")
         return False, current_ids
 
     def _score_word(
@@ -355,7 +355,7 @@ class ConstrainedDecoder:
         pattern = pvex.regex_pattern_from_prompt(prompt_text)
         if pattern is not None:
             self._last_regex_value = pattern
-            current_ids = self._force(current_ids, f'"{pattern}"')
+            current_ids = self._insert_tokens(current_ids, f'"{pattern}"')
             return pattern, current_ids
 
         candidates = pvex.regex_candidate_patterns()
@@ -375,7 +375,7 @@ class ConstrainedDecoder:
                 best_candidate = candidate
 
         self._last_regex_value = best_candidate
-        current_ids = self._force(current_ids, f'"{best_candidate}"')
+        current_ids = self._insert_tokens(current_ids, f'"{best_candidate}"')
         return best_candidate, current_ids
 
     def _apply_mask(

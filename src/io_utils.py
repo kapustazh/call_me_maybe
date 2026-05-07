@@ -74,8 +74,8 @@ def write_function_results(
     """Write final result array with only prompt, name, parameters keys."""
     out_path = Path(path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    payload = [result.model_dump() for result in results]
+    output_records = [result.model_dump() for result in results]
     out_path.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2),
+        json.dumps(output_records, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
