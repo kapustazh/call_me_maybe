@@ -17,16 +17,16 @@
   },
   {
     "prompt": "Greet shrek",
-    "name": "fn_get_square_root",
+    "name": "fn_greet",
     "parameters": {
-      "a": 5.0
+      "name": "shrek"
     }
   },
   {
     "prompt": "Greet john",
-    "name": "fn_get_square_root",
+    "name": "fn_greet",
     "parameters": {
-      "a": 5.0
+      "name": "john"
     }
   },
   {
