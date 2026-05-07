@@ -4,7 +4,7 @@ import math
 import re
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import cast
+
 
 from llm_sdk import Small_LLM_Model  # type: ignore
 import numpy as np
@@ -12,6 +12,7 @@ from src.tokenizer_vocab import encoded_to_token_ids
 from src.math_utils import log_softmax
 from src.models import FunctionDefinition
 from src.prompt import BobThePrompter
+from src.math_utils import softmax
 
 # For N=5 candidates, 4.5/N == 0.90 (matches docstring of adaptive_threshold).
 _UNIFORM_MULTIPLIER = 4.5
@@ -224,22 +225,18 @@ class FunctionSelector:
             )
 
     @staticmethod
-    def _probs(scores: list[float]) -> list[float]:
-        return cast(list[float], np.exp(log_softmax(scores)).tolist())
-
-    @staticmethod
     def _softmax_at_temperature(
         scores: list[float], temperature: float
     ) -> list[float]:
         if temperature <= 0:
             raise ValueError("temperature must be positive")
         scaled = [s / temperature for s in scores]
-        return FunctionSelector._probs(scaled)
+        return softmax(scaled)
 
     def _probs_with_peak_target(self, scores: list[float]) -> list[float]:
         """Cool temperature until the top softmax mass reaches the target."""
         if self._peak_target >= 1.0:
-            return self._probs(scores)
+            return softmax(scores)
         probs = self._softmax_at_temperature(scores, _TEMPERATURE_SCHEDULE[0])
         peak = max(probs) if probs else 0.0
         for t in _TEMPERATURE_SCHEDULE[1:]:
@@ -321,7 +318,7 @@ class FunctionSelector:
 
         # Use true softmax probabilities for confidence gating.
         # Temperature cooling (peak target) is only a selection heuristic.
-        confidence_probs = self._probs(scores)
+        confidence_probs = softmax(scores)
 
         selection_probs = self._probs_with_peak_target(scores)
         best_index = self._best_index(selection_probs)

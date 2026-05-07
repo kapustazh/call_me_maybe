@@ -293,27 +293,22 @@ class ConstrainedDecoder:
 
         if not value_str:
             return (0 if param_type == "integer" else 0.0), current_ids
-        try:
-            return (
-                int(float(value_str))
-                if param_type == "integer"
-                else float(value_str)
-            ), current_ids
-        except ValueError:
+        parsed = pvex.parse_number_text(
+            value_str,
+            integer_only=(param_type == "integer"),
+        )
+        if parsed is None:
             return 0.0, current_ids
+        return parsed, current_ids
 
     @staticmethod
     def _numeric_literal_complete(value_str: str, integer_only: bool) -> bool:
         if not value_str:
             return False
-        try:
-            if integer_only:
-                int(float(value_str))
-            else:
-                float(value_str)
-        except ValueError:
-            return False
-        return True
+        return (
+            pvex.parse_number_text(value_str, integer_only=integer_only)
+            is not None
+        )
 
     def _generate_boolean_value(
         self,

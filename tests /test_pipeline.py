@@ -267,7 +267,7 @@ def test_pipeline_drops_invalid_prompt_results(
         str(functions_path),
         str(input_path),
         str(output_path),
-        selection_confidence_threshold=0.80,
+        # selection_confidence_threshold=0.80,
     )
     pipeline.run()
 

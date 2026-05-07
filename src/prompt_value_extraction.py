@@ -310,6 +310,12 @@ def parse_numeric_at_index(
     if numeric_param_index >= len(matches):
         return None
     value_text = matches[numeric_param_index]
+    return parse_number_text(value_text, integer_only=integer_only)
+
+
+def parse_number_text(
+    value_text: str, *, integer_only: bool
+) -> int | float | None:
     if integer_only:
         try:
             return int(float(value_text))
