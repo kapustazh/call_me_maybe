@@ -1,0 +1,34 @@
+[1/24] Processing: Greet Great 'Shrek'
+
+  → fn_greet({"name": "Shrek"})
+
+[2/24] Processing: What is the sum of 2 and 3e5 ?
+
+  → fn_add_numbers({"a": 2, "b": 300000.0})
+
+[3/24] Processing: What is the sum of 265 and 345?
+
+  → fn_add_numbers({"a": 265, "b": 345.0})
+
+[4/24] Processing: Greet john
+
+  → fn_greet({"name": "john"})
+
+[5/24] Processing: Reverse the string 'hello'
+
+  → fn_reverse_string({"s": "hello"})
+
+[6/24] Processing: Reverse the string 'world'
+
+  → fn_reverse_string({"s": "world"})
+
+[7/24] Processing: What is the square root of 16?
+
+  → fn_get_square_root({"a": 16.0})
+
+[8/24] Processing: Calculate the square root of 144
+
+  → fn_get_square_root({"a": 144.0})
+
+[9/24] Processing: Replace all numbers in "Hello 34 I'm 233 years old" with NUMBERS
+
