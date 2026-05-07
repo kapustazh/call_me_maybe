@@ -54,33 +54,28 @@ def main() -> None:
         default="data/output/function_calling_results.json",
         help="Path to the <name>.json for the output",
     )
-    _ = parser.add_argument(
-        "--threshold",
-        type=float,
-        default=None,
-        help=(
-            "Selection confidence threshold "
-            "(default: adaptive min(3/N, 0.9))"
-        ),
-    )
-    _ = parser.add_argument(
-        "--selection-peak-target",
-        type=float,
-        default=None,
-        metavar="P",
-        help=(
-            "Anneal softmax temperature until the top candidate reaches "
-            "mass P (default: 0.9; use P>=1.0 to disable annealing)"
-        ),
-    )
+    # _ = parser.add_argument(
+    #     "--threshold",
+    #     type=float,
+    #     default=None,
+    #     help=(
+    #         "Selection confidence threshold "
+    #         "(default: adaptive min(4/N, 0.9))"
+    #     ),
+    # )
+    # _ = parser.add_argument(
+    #     "--selection-peak-target",
+    #     type=float,
+    #     default=None,
+    # )
     args: Namespace = parser.parse_args()
     try:
         pipeline = Pipeline(
             args.functions_definition,
             args.input,
             args.output,
-            selection_confidence_threshold=args.threshold,
-            selection_peak_softmax_target=args.selection_peak_target,
+            # selection_confidence_threshold=args.threshold,
+            # selection_peak_softmax_target=args.selection_peak_target,
         )
         pipeline.run()
     except (

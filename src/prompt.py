@@ -63,9 +63,9 @@ class BobThePrompter:
         example_params: dict[str, Any] = {}
         for param_name, param_def in chosen_fn.parameters.items():
             if param_def.type in ("number", "integer"):
-                example_params[param_name] = 5.0
+                example_params[param_name] = 10.0
             elif param_def.type == "boolean":
-                example_params[param_name] = True
+                example_params[param_name] = False
             elif param_def.type == "object":
                 example_params[param_name] = {}
             else:

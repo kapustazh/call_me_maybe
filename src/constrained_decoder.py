@@ -8,11 +8,12 @@ import numpy.typing as npt
 
 from llm_sdk import Small_LLM_Model  # type: ignore
 
-from src.model_utils import encoded_to_token_ids
+from src.tokenizer_vocab import encoded_to_token_ids
 from src.models import FunctionDefinition
 from src.prompt import BobThePrompter
 from src import prompt_value_extraction as pvex
 from src.tokenizer_vocab import TokenizerVocab
+from src.math_utils import log_softmax
 
 
 class ConstrainedDecodingError(RuntimeError):
@@ -60,6 +61,10 @@ class ConstrainedDecoder:
             list(self._build_safe_string_ids()),
             dtype=np.int32,
         )
+
+    def _force(self, current_ids: list[int], text: str) -> list[int]:
+        frag = encoded_to_token_ids(self._model.encode(text))
+        return current_ids + frag
 
     def decode_parameters(
         self,
@@ -172,10 +177,6 @@ class ConstrainedDecoder:
             "parameters": parameters,
         }
 
-    def _force(self, current_ids: list[int], text: str) -> list[int]:
-        frag = encoded_to_token_ids(self._model.encode(text))
-        return current_ids + frag
-
     def _generate_value(
         self,
         *,
@@ -240,10 +241,11 @@ class ConstrainedDecoder:
             if next_id == self._closing_quote_id:
                 break
             piece = self._piece_by_id.get(next_id, "")
-            cleaned = (
-                piece.replace("Ġ", " ").replace("Ċ", "").replace("Äł", "")
-            )
-            value_chars += cleaned
+            if any(m in piece for m in ("Ġ", "Ċ", "Äł")):
+                piece = (
+                    piece.replace("Ġ", " ").replace("Ċ", "").replace("Äł", "")
+                )
+            value_chars += piece
         inner = value_chars.strip().split("\\n")[0].strip()
         return inner, current_ids
 
@@ -340,12 +342,10 @@ class ConstrainedDecoder:
 
         for token_id in word_ids:
             logits = self._model.get_logits_from_input_ids(temp_ids)
-            logits_arr = np.array(logits, dtype=np.float32)
-            shifted = logits_arr - logits_arr.max()
-            log_probs = shifted - np.log(np.exp(shifted).sum())
+            log_probs = log_softmax(logits)
             total += (
                 float(log_probs[token_id])
-                if token_id < len(logits_arr)
+                if token_id < len(log_probs)
                 else -math.inf
             )
             temp_ids.append(token_id)

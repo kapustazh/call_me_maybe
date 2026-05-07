@@ -214,4 +214,13 @@ example
 
 # Output files
 data/output/
+
 data_test/output/
+
+src/*.txt
+
+new_data_set/output/
+
+#subject
+subject.txt
+en.subject.txt
