@@ -17,7 +17,7 @@ _UNIFORM_MULTIPLIER = 4.5
 _TARGET_TOP_SOFTMAX_PROB = 0.9
 _TEMPERATURE_SCHEDULE = (1.0, 0.7, 0.5, 0.35, 0.25, 0.15, 0.1, 0.05)
 _LEXICAL_BONUS_WEIGHT = 5.0
-_NO_LEXICAL_SUPPORT_MIN_CONFIDENCE = 0.95
+_NO_LEXICAL_SUPPORT_MIN_CONFIDENCE = 0.90
 _WORD_RE = re.compile(r"[a-z0-9]+")
 _STOPWORDS = {
     "a",
@@ -124,13 +124,13 @@ class FunctionSelector:
                         f"Function name {name!r} has no continuation "
                         f"after prefix {prefix!r}"
                     )
-                if name_ids[:len(prefix_ids)] != prefix_ids:
+                if name_ids[: len(prefix_ids)] != prefix_ids:
                     raise FunctionSelectorError(
                         "Selection prefix tokenization mismatch for "
                         f"{name!r}: prefix {prefix!r} tokens do not match "
                         "name-token prefix"
                     )
-                distinguishing_ids = name_ids[len(prefix_ids):]
+                distinguishing_ids = name_ids[len(prefix_ids) :]
             else:
                 distinguishing_ids = name_ids
             if not distinguishing_ids:

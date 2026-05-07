@@ -60,3 +60,35 @@
 
 [16/24] Processing: Calculate compound interest on 1234567.89 at 0.0375 rate for 23 years
 
+  → fn_calculate_compound_interest({"principal": 1234567.89, "rate": 0.0375, "years": 23})
+
+[17/24] Processing: Execute SQL query 'SELECT * FROM users' on the production database
+
+  → fn_execute_sql_query({"query": "SELECT * FROM users", "database": "production"})
+
+[18/24] Processing: Run the query 'INSERT INTO logs VALUES (1, 2, 3)' on the system database
+
+  → fn_execute_sql_query({"query": "INSERT INTO logs VALUES (1, 2, 3)", "database": "system"})
+
+[19/24] Processing: Read the file at /home/user/data.json with utf-8 encoding
+
+  → fn_read_file({"path": "/home/user/data.json", "encoding": "utf-8"})
+
+[20/24] Processing: Read C:\Users\john\config.ini with latin-1 encoding
+
+  → fn_read_file({"path": "C:\\Users\\john\\config.ini", "encoding": "latin-1"})
+
+[21/24] Processing: Format template: Hello {user}'s profile!
+
+  → fn_format_template({"template": "Hello {user}'s profile!"})
+
+[22/24] Processing: Format template: Say "hello" to {name}
+
+  → fn_format_template({"template": "Say \"hello\" to {name}"})
+
+[23/24] Processing: What is three plus -2 equal to?
+
+  → fn_add_numbers({"a": 3, "b": -2.0})
+
+[24/24] Processing: What is purpose of live?
+
