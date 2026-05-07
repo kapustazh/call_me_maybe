@@ -60,6 +60,68 @@ _REGEX_KEYWORDS: tuple[tuple[tuple[str, ...], str], ...] = (
     (("punctuation", "special char", "symbol"), r"[^\w\s]"),
 )
 _REGEX_META_CHAR_RE = re.compile(r"[\\\[\]\(\)\{\}\+\*\?\|\^\$\.]")
+_PARAM_NAME_TOKEN_RE = re.compile(r"[a-z]+")
+_REGEX_ROLE_HINTS: tuple[str, ...] = (
+    "regex",
+    "pattern",
+    "regexp",
+    "re",
+    "matcher",
+    "expression",
+)
+_REGEX_INTENT_HINTS: tuple[str, ...] = (
+    "regex",
+    "pattern",
+    "match",
+    "matching",
+    "replace",
+    "substitute",
+    "find",
+    "search",
+    "word",
+    "token",
+    "letter",
+    "character",
+)
+
+
+def is_regex_like_param_name(param_name: str) -> bool:
+    tokens = _PARAM_NAME_TOKEN_RE.findall(param_name.lower())
+    return any(token in _REGEX_ROLE_HINTS for token in tokens)
+
+
+def prompt_requests_regex(prompt: str) -> bool:
+    lower = prompt.lower()
+    if any(hint in lower for hint in _REGEX_INTENT_HINTS):
+        return True
+    return bool(re.search(r"\\[dwsbBAZ]|[\[\]\(\)\{\}\+\*\?\|\^\$]", prompt))
+
+
+def _literal_regex_target_from_quotes(
+    prompt: str,
+    quoted_values: list[str],
+) -> str | None:
+    if not quoted_values:
+        return None
+
+    left = re.search(
+        r"(?:word|token|substring|literal|text|sequence|character|letter)"
+        r"\s+['\"]([^'\"]+)['\"]",
+        prompt,
+        re.IGNORECASE,
+    )
+    if left:
+        return re.escape(left.group(1))
+
+    right = re.search(
+        r"['\"]([^'\"]+)['\"]\s+"
+        r"(?:word|token|substring|literal|text|sequence|character|letter)",
+        prompt,
+        re.IGNORECASE,
+    )
+    if right:
+        return re.escape(right.group(1))
+    return None
 
 
 def quoted_spans(prompt: str) -> list[str]:
@@ -190,16 +252,21 @@ def regex_pattern_from_prompt(prompt: str) -> str | None:
     for value in quoted_values:
         if _REGEX_META_CHAR_RE.search(value):
             return value
-    if "word" in text:
-        for value in quoted_values:
-            if value and " " not in value:
-                return value
-    if quoted_values and all(" " not in value for value in quoted_values):
-        return quoted_values[0]
+
+    literal_target = _literal_regex_target_from_quotes(prompt, quoted_values)
+    if literal_target is not None:
+        return literal_target
 
     for keywords, pattern in _REGEX_KEYWORDS:
         if any(kw in text for kw in keywords):
             return pattern
+
+    if prompt_requests_regex(prompt):
+        atomic_values = [
+            value for value in quoted_values if value and " " not in value
+        ]
+        if atomic_values:
+            return re.escape(atomic_values[0])
     return None
 
 

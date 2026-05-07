@@ -112,11 +112,22 @@ class ConstrainedDecoder:
         parameters: dict[str, Any] = {}
 
         param_names = list(chosen_function.parameters.keys())
-        string_params_plain = [
+        string_params = [
             p
             for p in param_names
             if chosen_function.parameters[p].type == "string"
-            and "regex" not in p.lower()
+        ]
+        regex_string_params = {
+            p for p in string_params if pvex.is_regex_like_param_name(p)
+        }
+        if (
+            not regex_string_params
+            and pvex.prompt_requests_regex(prompt_text)
+            and len(string_params) >= 3
+        ):
+            regex_string_params.add(string_params[1])
+        string_params_plain = [
+            p for p in string_params if p not in regex_string_params
         ]
         numeric_params = [
             p
@@ -135,7 +146,7 @@ class ConstrainedDecoder:
             value, current_ids = self._generate_value(
                 current_ids=current_ids,
                 param_type=param_def.type,
-                param_name=param_name,
+                is_regex_string=(param_name in regex_string_params),
                 prompt_text=prompt_text,
                 string_plain_index=(
                     string_params_plain.index(param_name)
@@ -170,14 +181,14 @@ class ConstrainedDecoder:
         *,
         current_ids: list[int],
         param_type: str,
-        param_name: str,
+        is_regex_string: bool,
         prompt_text: str,
         string_plain_index: int,
         numeric_index: int,
         integer_only: bool,
     ) -> tuple[Any, list[int]]:
         if param_type == "string":
-            if "regex" in param_name.lower():
+            if is_regex_string:
                 return self._generate_regex_value(current_ids, prompt_text)
             return self._generate_string_value(
                 current_ids,

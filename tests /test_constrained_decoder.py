@@ -263,3 +263,67 @@ def test_extracts_explicit_regex_literal_pattern() -> None:
         "regex": r"\d+",
         "replacement": "NUM",
     }
+
+
+def test_extracts_regex_when_param_named_pattern() -> None:
+    model = cast(Small_LLM_Model, FakeDecoderModel())
+    token_map = {chr(code): code for code in range(32, 127)}
+    vocab = TokenizerVocab(token_map, model=model)
+    function_definition = FunctionDefinition(
+        name="fn_substitute_string_with_pattern",
+        description="Replace text matched by pattern in source string.",
+        parameters={
+            "source_string": FunctionParameter(type="string"),
+            "pattern": FunctionParameter(type="string"),
+            "replacement": FunctionParameter(type="string"),
+        },
+        returns=FunctionParameter(type="string"),
+    )
+    decoder = ConstrainedDecoder(
+        model=model,
+        tokenizer_vocab=vocab,
+        functions=[function_definition],
+    )
+
+    parameters = decoder.decode_parameters(
+        "Substitute the word 'cat' with 'dog' in 'The cat sat'",
+        function_definition,
+    )
+
+    assert parameters == {
+        "source_string": "The cat sat",
+        "pattern": "cat",
+        "replacement": "dog",
+    }
+
+
+def test_extracts_regex_with_generic_middle_string_fallback() -> None:
+    model = cast(Small_LLM_Model, FakeDecoderModel())
+    token_map = {chr(code): code for code in range(32, 127)}
+    vocab = TokenizerVocab(token_map, model=model)
+    function_definition = FunctionDefinition(
+        name="fn_replace_tokens",
+        description="Replace matches in source using replacement.",
+        parameters={
+            "source": FunctionParameter(type="string"),
+            "needle": FunctionParameter(type="string"),
+            "replacement": FunctionParameter(type="string"),
+        },
+        returns=FunctionParameter(type="string"),
+    )
+    decoder = ConstrainedDecoder(
+        model=model,
+        tokenizer_vocab=vocab,
+        functions=[function_definition],
+    )
+
+    parameters = decoder.decode_parameters(
+        "Substitute the word 'cat' with 'dog' in 'The cat sat'",
+        function_definition,
+    )
+
+    assert parameters == {
+        "source": "The cat sat",
+        "needle": "cat",
+        "replacement": "dog",
+    }
