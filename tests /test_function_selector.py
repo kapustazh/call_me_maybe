@@ -37,6 +37,10 @@ class FakeSelectorModel:
             logits[ord("a")] = 10.0
             logits[ord("g")] = 1.0
             return logits
+        if self._mode == "medium_add":
+            logits[ord("a")] = 2.0
+            logits[ord("g")] = 1.0
+            return logits
         logits[ord("a")] = 1.0
         logits[ord("g")] = 1.0
         return logits
@@ -173,3 +177,27 @@ def test_prefix_token_continuation_uses_fn_boundary() -> None:
         confidence_threshold=0.60,
     )
     assert selector.select("What is sum of 2 and 3?") == "fn_add_numbers"
+
+
+def test_rejects_medium_confidence_without_lexical_support() -> None:
+    selector = FunctionSelector(
+        cast(Small_LLM_Model, FakeSelectorModel(mode="medium_add")),
+        _definitions(),
+        confidence_threshold=0.60,
+    )
+    try:
+        _ = selector.select("What is purpose of live?")
+    except FunctionSelectorError as exc:
+        assert "no lexical support" in str(exc)
+    else:
+        raise AssertionError("Expected FunctionSelectorError")
+
+
+def test_plus_synonym_provides_lexical_support_for_add() -> None:
+    selector = FunctionSelector(
+        cast(Small_LLM_Model, FakeSelectorModel(mode="medium_add")),
+        _definitions(),
+        confidence_threshold=0.60,
+    )
+    selected = selector.select("What is three plus -2 equal to?")
+    assert selected == "fn_add_numbers"

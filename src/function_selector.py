@@ -17,6 +17,7 @@ _UNIFORM_MULTIPLIER = 4.5
 _TARGET_TOP_SOFTMAX_PROB = 0.9
 _TEMPERATURE_SCHEDULE = (1.0, 0.7, 0.5, 0.35, 0.25, 0.15, 0.1, 0.05)
 _LEXICAL_BONUS_WEIGHT = 5.0
+_NO_LEXICAL_SUPPORT_MIN_CONFIDENCE = 0.95
 _WORD_RE = re.compile(r"[a-z0-9]+")
 _STOPWORDS = {
     "a",
@@ -42,6 +43,17 @@ _STOPWORDS = {
     "what",
     "with",
     "you",
+}
+_TERM_SYNONYMS: dict[str, tuple[str, ...]] = {
+    "add": ("sum", "plus"),
+    "sum": ("add", "plus"),
+    "plus": ("add", "sum"),
+    "multiply": ("product", "times"),
+    "product": ("multiply", "times"),
+    "times": ("multiply", "product"),
+    "greeting": ("greet",),
+    "hello": ("greet",),
+    "hi": ("greet",),
 }
 
 
@@ -142,28 +154,42 @@ class FunctionSelector:
     @staticmethod
     def _normalize_terms(text: str) -> set[str]:
         terms = set(_WORD_RE.findall(text.lower().replace("_", " ")))
-        return {
+        filtered = {
             term for term in terms if term not in _STOPWORDS and term != "fn"
         }
+        expanded = set(filtered)
+        for term in filtered:
+            expanded.update(_TERM_SYNONYMS.get(term, ()))
+        return expanded
 
-    def _lexical_bonus(
+    def _lexical_overlap_count(
         self,
         user_prompt: str,
         function_definition: FunctionDefinition,
-    ) -> float:
+    ) -> int:
         prompt_terms = self._normalize_terms(user_prompt)
         if not prompt_terms:
-            return 0.0
+            return 0
 
         function_text = (
             f"{function_definition.name} {function_definition.description}"
         )
         function_terms = self._normalize_terms(function_text)
         overlap = prompt_terms & function_terms
-        if not overlap:
+        return len(overlap)
+
+    def _lexical_bonus(
+        self,
+        user_prompt: str,
+        function_definition: FunctionDefinition,
+    ) -> float:
+        overlap_count = self._lexical_overlap_count(
+            user_prompt, function_definition
+        )
+        if overlap_count <= 0:
             return 0.0
 
-        return float(len(overlap)) * _LEXICAL_BONUS_WEIGHT
+        return float(overlap_count) * _LEXICAL_BONUS_WEIGHT
 
     @staticmethod
     def _best_index(probs: list[float]) -> int:
@@ -177,12 +203,22 @@ class FunctionSelector:
         probs: list[float],
         best_index: int,
         best_name: str,
+        best_overlap_count: int,
     ) -> None:
         confidence = float(probs[best_index])
         if confidence < self._threshold:
             raise FunctionSelectorError(
                 f"Low selection confidence: {confidence:.3f} < "
                 f"{self._threshold:.3f} for '{best_name}'"
+            )
+        if (
+            best_overlap_count <= 0
+            and confidence < _NO_LEXICAL_SUPPORT_MIN_CONFIDENCE
+        ):
+            raise FunctionSelectorError(
+                "Selection has no lexical support: "
+                f"{confidence:.3f} < "
+                f"{_NO_LEXICAL_SUPPORT_MIN_CONFIDENCE:.3f} for '{best_name}'"
             )
 
     @staticmethod
@@ -284,5 +320,13 @@ class FunctionSelector:
         selection_probs = self._probs_with_peak_target(scores)
         best_index = self._best_index(selection_probs)
         best_name = self._candidates[best_index].name
-        self._validate_confidence(confidence_probs, best_index, best_name)
+        best_overlap_count = self._lexical_overlap_count(
+            user_prompt, self._functions[best_index]
+        )
+        self._validate_confidence(
+            confidence_probs,
+            best_index,
+            best_name,
+            best_overlap_count,
+        )
         return best_name
