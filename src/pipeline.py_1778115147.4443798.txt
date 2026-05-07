@@ -32,3 +32,31 @@
 
 [9/24] Processing: Replace all numbers in "Hello 34 I'm 233 years old" with NUMBERS
 
+  → fn_substitute_string_with_regex({"source_string": "Hello 34 I'm 233 years old", "regex": "\\d+", "replacement": "NUMBERS"})
+
+[10/24] Processing: Replace all vowels in 'Programming is fun' with asterisks
+
+  → fn_substitute_string_with_regex({"source_string": "Programming is fun", "regex": "[aeiouAEIOU]", "replacement": "*"})
+
+[11/24] Processing: Substitute the word 'cat' with 'dog' in 'The cat sat on the mat with another cat'
+
+  → fn_substitute_string_with_regex({"source_string": "The cat sat on the mat with another cat", "regex": "cat", "replacement": "dog"})
+
+[12/24] Processing: What is the product of 3 and 5?
+
+  → fn_multiply_numbers({"a": 3.0, "b": 5.0})
+
+[13/24] Processing: What is the product of -12 and +4?
+
+  → fn_multiply_numbers({"a": -12.0, "b": 4.0})
+
+[14/24] Processing: Is 4 an even number?
+
+  → fn_is_even({"n": 4})
+
+[15/24] Processing: Is +127 an even number?
+
+  → fn_is_even({"n": 127})
+
+[16/24] Processing: Calculate compound interest on 1234567.89 at 0.0375 rate for 23 years
+
