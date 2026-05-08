@@ -23,11 +23,30 @@ file lists only successful calls.
 Goal is reliable structured output from a ~0.6B causal LM (`Qwen/Qwen3-0.6B` by
 default via `llm_sdk`), not free-form JSON from the model alone. The pipeline
 loads inputs with **Pydantic**, runs **logit-masked** literal generation per
-parameter type, and prints **per-prompt progress** on stdout while it runs.
+parameter type, and shows **per-prompt progress** in the terminal (rich UI when
+the session is interactive; otherwise plain stdout/stderr).
+
+## Terminal UI
+
+When stdout is an interactive terminal, the run uses a **split-screen** view:
+progress and messages on one side, a small **branding / animation** panel on the
+other, with **color** where the terminal supports it. Text appears in a
+**streaming** style so long lines do not dump all at once.
+
+If the fancy UI cannot start (e.g. piped output, automated tests), the same run
+falls back to **normal line printing** on stdout/stderr.
+
+After all prompts finish and the result file is written, the program **waits**
+so you can read the log. Press **q** or **Esc** once to see a short **confirm**
+line; press **q** or **Esc** again to leave. Any other key **cancels** that
+confirm and returns to the log. Then the terminal is restored to usual
+line-editing mode.
+
+Details and timing defaults live in `src/render.py` if you want to tweak them.
 
 ## Instructions
 
-**Prerequisites:** Python ≥ 3.10, [uv](https://github.com/astral-sh/uv), enough
+**Prerequisites:** Python ≥ 3.11, [uv](https://github.com/astral-sh/uv), enough
 disk/RAM for the HF checkpoint (first run downloads weights).
 
 ```bash
@@ -45,6 +64,7 @@ make lint       # flake8 + mypy (non-strict)
 | `--functions_definition` | `data/input/functions_definition.json` |
 | `--input` | `data/input/function_calling_tests.json` |
 | `--output` | `data/output/function_calling_results.json` |
+| `--model_name` | `Qwen/Qwen3-0.6B` |
 
 Use a **matching** definitions file for your prompt set (e.g. extended tests
 under `data_test/` need `data_test/input/functions_definition.json`), or
@@ -56,22 +76,28 @@ make run ARGS='--functions_definition data_test/input/functions_definition.json 
   --output data_test/output/function_calling_results.json'
 ```
 
-**Programmatic model:** `Pipeline(..., model_name="HF/model-id")` passes the
-id to `Small_LLM_Model`; empty string keeps the SDK default. The CLI does not
-expose `--model` yet.
+**Model selection:** pass Hugging Face model id to `Small_LLM_Model`.
+
+- CLI: `--model_name "HF/model-id"` (empty/whitespace keeps SDK default)
+- Code: `Pipeline(..., model_name="HF/model-id")`
 
 ## Algorithm (short)
 
-1. Validate JSON inputs; **deduplicate** function definitions by `name` (first
-   wins) so softmax over candidates is not split by duplicates.
-2. **Selection prompt** lists tools; suffix is the **longest common prefix** of
-   all function names (character LCP), so prompt ending and token suffix for
-   scoring stay aligned. Softmax over per-candidate boundary logits with a
-   **minimum probability** threshold (`DEFAULT_SELECTION_CONFIDENCE` in
-   `function_selector.py`); continuation logits break first-token ties.
-3. For the chosen function, each parameter: **heuristic extraction** when
-   pattern matches, else **masked autoregressive** decode of one JSON literal,
-   then `json.loads` into Python types per schema.
+1. Load and validate JSON inputs with Pydantic. Function definitions are
+   **deduplicated by name** (first wins) to avoid splitting probability mass.
+2. Select function name with the LLM:
+   - Build a selection prompt listing tools and asking for the correct one.
+   - Use the **longest common prefix** of all tool names so all candidates share
+     the same prompt ending at token level.
+   - Score candidates from model logits at the decision boundary, apply softmax,
+     then enforce a **minimum confidence threshold**.
+   - Add a small **lexical overlap bonus** (prompt vs tool name/description) to
+     reduce “random but confident” routing when words clearly match a tool.
+3. Decode parameters for chosen function:
+   - For each parameter, try safe **pattern-based extraction** from the prompt
+     (numbers, quoted spans, paths, templates, etc.).
+   - Otherwise, generate exactly one JSON literal with **logit masking**
+     (constrained decoding) so only type-valid tokens are allowed.
 
 ## Design choices
 
@@ -92,8 +118,8 @@ expose `--model` yet.
 
 ## Testing
 
-- `tests /` — tokenizer/vocab, selector, decoder, pipeline (including golden
-  output with a fake model where applicable).
+- `tests /` — tokenizer/vocab, selector, decoder, pipeline. Includes a “golden”
+  pipeline test using a fake model to make outputs deterministic.
 
 ## Resources
 
