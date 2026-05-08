@@ -86,11 +86,27 @@ _REGEX_INTENT_HINTS: tuple[str, ...] = (
 
 
 def is_regex_like_param_name(param_name: str) -> bool:
+    """Check whether a parameter name suggests it expects a regex value.
+
+    Args:
+        param_name: Parameter name from function schema.
+
+    Returns:
+        True if name contains common regex tokens (e.g. "pattern", "regex").
+    """
     tokens = _PARAM_NAME_TOKEN_RE.findall(param_name.lower())
     return any(token in _REGEX_ROLE_HINTS for token in tokens)
 
 
 def prompt_requests_regex(prompt: str) -> bool:
+    """Heuristic: detect whether prompt intent is about regex/pattern matching.
+
+    Args:
+        prompt: Raw user prompt.
+
+    Returns:
+        True if prompt contains regex intent hints or regex metacharacters.
+    """
     lower = prompt.lower()
     if any(hint in lower for hint in _REGEX_INTENT_HINTS):
         return True
@@ -101,6 +117,7 @@ def _literal_regex_target_from_quotes(
     prompt: str,
     quoted_values: list[str],
 ) -> str | None:
+    """Infer literal regex target from quoted span context in prompt."""
     if not quoted_values:
         return None
 
@@ -125,11 +142,20 @@ def _literal_regex_target_from_quotes(
 
 
 def quoted_spans(prompt: str) -> list[str]:
+    """Extract quoted spans (single or double quotes) from prompt.
+
+    Args:
+        prompt: Raw user prompt.
+
+    Returns:
+        List of extracted spans (without quotes), in appearance order.
+    """
     found = re.findall(r"'([^']*)'|\"([^\"]+)\"", prompt)
     return [a or b for a, b in found if (a or b)]
 
 
 def template_tail_if_braces(prompt: str) -> str | None:
+    """Return colon tail if it contains braces (template-like literal)."""
     m = re.search(r":\s*(.+)$", prompt)
     if m and ("{" in m.group(1) or "}" in m.group(1)):
         return m.group(1).strip()
@@ -137,6 +163,7 @@ def template_tail_if_braces(prompt: str) -> str | None:
 
 
 def first_path_windows(prompt: str) -> str | None:
+    """Extract first Windows or POSIX path-like substring from prompt."""
     pm = re.search(r'([A-Za-z]:\\[^\s\'"]+|/[^\s\'"]+)', prompt)
     if not pm:
         return None
@@ -144,6 +171,7 @@ def first_path_windows(prompt: str) -> str | None:
 
 
 def token_pattern_values(prompt: str) -> list[str]:
+    """Extract token-like values (paths, dashed identifiers) from prompt."""
     out: list[str] = []
     for match in _TOKEN_PATTERN.finditer(prompt):
         token_val = next(g for g in match.groups() if g is not None)
@@ -154,6 +182,7 @@ def token_pattern_values(prompt: str) -> list[str]:
 
 
 def symbol_from_keywords(prompt: str) -> str | None:
+    """Map common words ("dash", "underscore") to the intended symbol."""
     lower = prompt.lower()
     for word, symbol in _SYMBOL_WORDS:
         if word in lower:
@@ -162,6 +191,7 @@ def symbol_from_keywords(prompt: str) -> str | None:
 
 
 def plain_text_tail(prompt: str) -> str | None:
+    """Extract a short plain-text value from prompt tail when unambiguous."""
     if not prompt.strip():
         return None
     if re.search(r"['\"]", prompt):
@@ -199,6 +229,17 @@ def try_non_regex_string(
     string_param_index: int,
     last_regex_value: str | None,
 ) -> str | None:
+    """Try to extract a string argument without model generation.
+
+    Args:
+        prompt: Raw user prompt.
+        string_param_index: Index among non-regex string parameters.
+        last_regex_value: Last regex literal used.
+            Avoid reuse as plain string.
+
+    Returns:
+        Extracted string literal, or None if no safe heuristic match.
+    """
     tt = template_tail_if_braces(prompt)
     if tt is not None:
         return tt
@@ -239,6 +280,14 @@ def try_non_regex_string(
 
 
 def regex_pattern_from_prompt(prompt: str) -> str | None:
+    """Try to extract a regex pattern literal from prompt.
+
+    Args:
+        prompt: Raw user prompt.
+
+    Returns:
+        Regex pattern text if found, else None.
+    """
     text = prompt.lower()
     explicit = re.search(
         r"(?:regex|pattern)\s+(?:is\s+)?['\"]([^'\"]+)['\"]",
@@ -271,6 +320,16 @@ def regex_pattern_from_prompt(prompt: str) -> str | None:
 
 
 def ordered_numeric_strings(prompt: str) -> list[str]:
+    """Collect numeric substrings in appearance order.
+
+    Prefer matches outside quotes when present.
+
+    Args:
+        prompt: Raw user prompt.
+
+    Returns:
+        List of numeric strings (digits or word-numbers) ordered by position.
+    """
     hits_outside_quotes: list[tuple[int, str]] = []
     hits_inside_quotes: list[tuple[int, str]] = []
     quoted_spans = [
@@ -306,6 +365,16 @@ def parse_numeric_at_index(
     *,
     integer_only: bool,
 ) -> int | float | None:
+    """Parse the Nth numeric value from prompt.
+
+    Args:
+        prompt: Raw user prompt.
+        numeric_param_index: Which numeric occurrence to take (0-based).
+        integer_only: If True, coerce to int semantics.
+
+    Returns:
+        Parsed number, or None if not found/parsable.
+    """
     matches = ordered_numeric_strings(prompt)
     if numeric_param_index >= len(matches):
         return None
@@ -316,6 +385,15 @@ def parse_numeric_at_index(
 def parse_number_text(
     value_text: str, *, integer_only: bool
 ) -> int | float | None:
+    """Parse one numeric literal text into int/float.
+
+    Args:
+        value_text: Numeric string.
+        integer_only: If True, parse as int (via float for "3.0" forms).
+
+    Returns:
+        Parsed number, or None if invalid.
+    """
     if integer_only:
         try:
             return int(float(value_text))
@@ -328,6 +406,7 @@ def parse_number_text(
 
 
 def regex_candidate_patterns() -> list[str]:
+    """Return ordered unique regex patterns from built-in keyword table."""
     seen: set[str] = set()
     ordered: list[str] = []
     for _, pattern in _REGEX_KEYWORDS:

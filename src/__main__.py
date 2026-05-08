@@ -32,6 +32,14 @@ from src.pipeline import Pipeline
 
 
 def main() -> None:
+    """Run CLI entrypoint for translating prompts into function calls.
+
+    Reads function schema and prompt tests JSON files.
+    Runs selection + constrained decoding. Writes results to output JSON file.
+
+    Raises:
+        SystemExit: If input files missing/invalid or schema validation fails.
+    """
     parser: ArgumentParser = argparse.ArgumentParser(
         prog="call_me_maybe",
         description="Translates prompts into function calls",
@@ -54,12 +62,19 @@ def main() -> None:
         default="data/output/function_calling_results.json",
         help="Path to the <name>.json for the output",
     )
+    _ = parser.add_argument(
+        "--model_name",
+        type=str,
+        default="Qwen/Qwen3-0.6B",
+        help="Name of the model to use (default: Qwen/Qwen3-0.6B)",
+    )
     args: Namespace = parser.parse_args()
     try:
         pipeline = Pipeline(
             args.functions_definition,
             args.input,
             args.output,
+            args.model_name,
         )
         pipeline.run()
     except (

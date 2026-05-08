@@ -7,10 +7,18 @@ from src.models import FunctionDefinition
 
 
 class Prefix:
-    """Longest common prefix of function names"""
+    """Prefix helpers for tool-name token alignment."""
 
     @staticmethod
     def longest_common_prefix(strs: list[str]) -> str:
+        """Compute longest common prefix across strings.
+
+        Args:
+            strs: Input strings.
+
+        Returns:
+            Longest common prefix. Empty string if "strs" empty.
+        """
         if not strs:
             return ""
         sorted_strs = sorted(strs)
@@ -24,15 +32,25 @@ class Prefix:
 
 
 class BobThePrompter:
+    """Build selection/decode prompts for function calling tasks.
+
+    Centralizes prompt formatting so selector and decoder stay aligned.
+    """
+
     def __init__(self, functions: list[FunctionDefinition]) -> None:
+        """Create prompter for a fixed function list.
+
+        Args:
+            functions: Function definitions exposed to the model.
+        """
         self._functions = functions
 
     def function_name_prefix(self) -> str:
         """Shared prefix used in selection prompt.
 
-        Keep it tokenization-friendly for Qwen function names: all current
-        tools start with ``fn_...`` but continuation tokens are aligned after
-        ``fn`` (e.g. ``_add``, ``_get``), not after ``fn_``.
+        Keep it tokenization-friendly for Qwen function names: current tools
+        start with "fn_..." but continuation tokens are aligned after "fn"
+        (e.g. "_add", "_get"), not after "fn_".
         """
         names = [fn.name for fn in self._functions]
         if not names:
@@ -44,6 +62,14 @@ class BobThePrompter:
         return Prefix.longest_common_prefix(names)
 
     def build_selection_prompt(self, user_prompt: str) -> str:
+        """Build prompt asking model to select function name.
+
+        Args:
+            user_prompt: Raw user request.
+
+        Returns:
+            Full selection prompt string.
+        """
         prefix = self.function_name_prefix()
         fn_lines = "\n".join(
             f"- {fn.name}: {fn.description}" for fn in self._functions
@@ -60,6 +86,15 @@ class BobThePrompter:
         user_prompt: str,
         chosen_fn: FunctionDefinition,
     ) -> str:
+        """Build prompt for argument extraction for chosen function.
+
+        Args:
+            user_prompt: Raw user request.
+            chosen_fn: Selected function schema.
+
+        Returns:
+            Prompt string used to condition constrained decoding.
+        """
         example_params: dict[str, Any] = {}
         for param_name, param_def in chosen_fn.parameters.items():
             if param_def.type in ("number", "integer"):

@@ -8,14 +8,35 @@ NonEmptyStr = Annotated[
 
 
 class PromptItem(BaseModel):
+    """Single prompt record from input test file.
+
+    Attributes:
+        prompt: Natural-language request string. Non-empty after trimming.
+    """
+
     prompt: NonEmptyStr
 
 
 class FunctionParameter(BaseModel):
+    """Parameter schema entry for a function definition.
+
+    Attributes:
+        type: JSON type name expected for this parameter.
+    """
+
     type: Literal["number", "integer", "boolean", "string", "object"]
 
 
 class FunctionDefinition(BaseModel):
+    """Callable function schema used for routing and constrained decoding.
+
+    Attributes:
+        name: Function name exposed to the model (e.g. 'fn_add_numbers').
+        description: Short natural-language description of purpose.
+        parameters: Mapping of parameter name to its expected JSON type.
+        returns: Return type metadata (not used for decoding, kept for parity).
+    """
+
     model_config = ConfigDict(extra="forbid")
 
     name: NonEmptyStr
@@ -25,6 +46,14 @@ class FunctionDefinition(BaseModel):
 
 
 class FunctionResult(BaseModel):
+    """Output record for one successfully processed prompt.
+
+    Attributes:
+        prompt: Original prompt text.
+        name: Selected function name.
+        parameters: Extracted arguments matching function schema.
+    """
+
     model_config = ConfigDict(extra="forbid")
 
     prompt: str

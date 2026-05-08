@@ -1,4 +1,9 @@
 """
+Project initialization for src.
+
+This module sets local cache directories for uv and Hugging Face tooling.
+Keep downloads and temporary files inside repository for reproducible runs.
+Also helps sandboxed environments.
 
               .     .       .  .   . .   .   . .    +  .
         .     .  :     .    .. :. .___---------___.

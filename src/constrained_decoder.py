@@ -21,6 +21,13 @@ class ConstrainedDecodingError(RuntimeError):
 
 
 class ConstrainedDecoder:
+    """Decode JSON-typed parameters with token-level constraints.
+
+    Given chosen function schema and user prompt, decoder generates JSON object
+    '{"name": ..., "parameters": {...}}'. Restricts next-token choices so each
+    literal value stays valid for expected type.
+    """
+
     _DEFAULT_MAX_NEW_TOKENS_STRING = 50
     _DEFAULT_MAX_NEW_TOKENS_NUMBER = 15
 
@@ -32,6 +39,19 @@ class ConstrainedDecoder:
         max_new_tokens_string: int = _DEFAULT_MAX_NEW_TOKENS_STRING,
         max_new_tokens_number: int = _DEFAULT_MAX_NEW_TOKENS_NUMBER,
     ) -> None:
+        """Initialize decoder and precompute token masks.
+
+        Args:
+            model: LLM wrapper providing logits and encoding helpers.
+            tokenizer_vocab: Token-to-text mapping for mask construction.
+            functions: Function definitions (used to build decode prompt).
+            max_new_tokens_string: Max tokens for string literal generation.
+            max_new_tokens_number: Max tokens for numeric literal generation.
+
+        Raises:
+            ConstrainedDecodingError:
+                If tokenizer cannot produce quote token id for string literals.
+        """
         self._model: Small_LLM_Model = model
         self._max_new_tokens_string: int = max_new_tokens_string
         self._max_new_tokens_number: int = max_new_tokens_number
@@ -63,6 +83,7 @@ class ConstrainedDecoder:
         )
 
     def _insert_tokens(self, current_ids: list[int], text: str) -> list[int]:
+        """Append token ids for literal "text" to current id sequence."""
         text_token_ids = encoded_to_token_ids(self._model.encode(text))
         return current_ids[:] + text_token_ids
 
@@ -71,6 +92,18 @@ class ConstrainedDecoder:
         user_prompt: str,
         function_definition: FunctionDefinition,
     ) -> dict[str, object]:
+        """Decode argument values for a chosen function schema.
+
+        Args:
+            user_prompt: Raw user request.
+            function_definition: Selected function schema.
+
+        Returns:
+            Mapping of parameter name to decoded Python value.
+
+        Raises:
+            ConstrainedDecodingError: If decoding cannot complete.
+        """
         decode_prompt = self._prompter.build_decode_prompt(
             user_prompt,
             function_definition,
@@ -84,6 +117,7 @@ class ConstrainedDecoder:
         return dict(result["parameters"])
 
     def _build_safe_string_ids(self) -> set[int]:
+        """Build allowed token ids for JSON string literal body."""
         forbidden = {'"', "\n", "\r"}
         ids = {
             token_id
@@ -94,6 +128,7 @@ class ConstrainedDecoder:
         return ids
 
     def _build_valid_number_ids(self) -> set[int]:
+        """Build allowed token ids for numeric JSON literals."""
         valid_chars = set("0123456789.-")
         out: set[int] = set()
         for token_id, piece in self._piece_by_id.items():
@@ -111,6 +146,7 @@ class ConstrainedDecoder:
         *,
         prompt_text: str,
     ) -> dict[str, Any]:
+        """Decode full '{"name": ..., "parameters": ...}' structure."""
         self._last_regex_value: str | None = None
 
         current_ids = list(input_ids)
@@ -271,7 +307,7 @@ class ConstrainedDecoder:
                 current_ids = self._insert_tokens(current_ids, fragment)
                 return parsed, current_ids
 
-        valid_chars = set("0123456789.-")
+        valid_chars: set[str] = set("0123456789.-")
         value_str = ""
         for _ in range(self._max_new_tokens_number):
             logits = self._model.get_logits_from_input_ids(current_ids)

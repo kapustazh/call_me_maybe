@@ -12,13 +12,26 @@ class TokenizerVocabError(ValueError):
 
 
 class TokenizerVocab:
-    """Token ID helpers aligned to model tokenizer assets."""
+    """Token ID helpers aligned to model tokenizer assets.
+
+    Builds stable mapping between token IDs and text pieces.
+    Uses tokenizer/vocab JSON files shipped with HF model package.
+    """
 
     def __init__(
         self,
         token_to_id: Mapping[str, int],
         model: Small_LLM_Model | None = None,
     ) -> None:
+        """Create vocab helper from token->id mapping.
+
+        Args:
+            token_to_id: Mapping of token string to integer id.
+            model: Optional model instance to decode ids into normalized text.
+
+        Raises:
+            TokenizerVocabError: If mapping is empty.
+        """
         if not token_to_id:
             raise TokenizerVocabError("Tokenizer vocab is empty")
 
@@ -30,6 +43,19 @@ class TokenizerVocab:
 
     @classmethod
     def from_model(cls, model: Small_LLM_Model) -> "TokenizerVocab":
+        """Load token map from model tokenizer assets.
+
+        Tries 'tokenizer_file' first (preferred), falls back to 'vocab_file'.
+
+        Args:
+            model: LLM wrapper providing asset paths.
+
+        Returns:
+            TokenizerVocab bound to 'model'.
+
+        Raises:
+            TokenizerVocabError: If tokenizer and vocab files cannot be loaded.
+        """
         tokenizer_error: ValueError | None = None
         try:
             token_map: dict[str, int] = _read_token_map(
@@ -53,6 +79,14 @@ class TokenizerVocab:
         return cls(token_map, model)
 
     def id_to_text(self, token_id: int) -> str | None:
+        """Get decoded text piece for a token id.
+
+        Args:
+            token_id: Token integer id.
+
+        Returns:
+            Decoded text if token exists, else None.
+        """
         raw_token: str | None = self._id_to_token.get(token_id)
         if raw_token is None:
             return None
@@ -61,6 +95,11 @@ class TokenizerVocab:
         return str(self._model.decode(ids=[token_id]))
 
     def id_to_text_map(self) -> dict[int, str]:
+        """Build token-id to decoded text mapping.
+
+        Returns:
+            Dict of token_id -> text for all known ids.
+        """
         out: dict[int, str] = {}
         for token_id in sorted(self._id_to_token):
             text: str | None = self.id_to_text(token_id)
@@ -74,6 +113,20 @@ def _read_token_map(
     *,
     from_tokenizer_file: bool,
 ) -> dict[str, int]:
+    """Read and validate token map JSON.
+
+    Args:
+        path: Path to JSON file.
+        from_tokenizer_file: True for 'tokenizer.json' format.
+            False for flat vocab map format.
+
+    Returns:
+        Token->id mapping.
+
+    Raises:
+        TokenizerVocabError: If schema is invalid or token map empty.
+        JsonFileError: If JSON cannot be read/parsed.
+    """
     raw = load_json_file(path)
     if not isinstance(raw, dict):
         source = "tokenizer_file" if from_tokenizer_file else "vocab_file"
@@ -94,6 +147,7 @@ def _read_token_map(
 
 
 def _normalize_map(raw: Mapping[object, object]) -> dict[str, int]:
+    """Normalize untyped mapping to 'dict[str, int]' with validation."""
     out: dict[str, int] = {}
     for token, token_id in raw.items():
         if not isinstance(token, str):
@@ -107,7 +161,18 @@ def _normalize_map(raw: Mapping[object, object]) -> dict[str, int]:
 
 
 def encoded_to_token_ids(encoded: object) -> list[int]:
-    """Normalize model.encode output to list[int] for one prompt."""
+    """Normalize 'Small_LLM_Model.encode' output to 'list[int]'.
+
+    Args:
+        encoded: Output of 'model.encode(text)'.
+            Supports plain lists or tensors convertible via '.tolist()'.
+
+    Returns:
+        One sequence of token ids.
+
+    Raises:
+        TypeError: If 'encoded' has unsupported structure.
+    """
     raw: Any
     tolist = getattr(encoded, "tolist", None)
     if callable(tolist):

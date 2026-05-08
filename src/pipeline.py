@@ -29,7 +29,12 @@ _WRIER_DELAY = 0.03
 
 
 def _write_char_by_char(text: str, *, delay: float = _WRIER_DELAY) -> None:
-    """Write text char-by-char to stdout for visual feedback."""
+    """Write text char-by-char to stdout for visual feedback.
+
+    Args:
+        text: Text to write.
+        delay: Per-character delay in seconds.
+    """
     for c in text:
         sys.stdout.write(c)
         sys.stdout.flush()
@@ -39,7 +44,14 @@ def _write_char_by_char(text: str, *, delay: float = _WRIER_DELAY) -> None:
 
 
 def _format_params(parameters: dict[str, Any]) -> str:
-    """Compact JSON repr of parameters for display."""
+    """Format parameter dict for human-readable progress output.
+
+    Args:
+        parameters: Parameter mapping for one function call.
+
+    Returns:
+        JSON string without ASCII escaping.
+    """
     return json.dumps(parameters, ensure_ascii=False)
 
 
@@ -49,8 +61,16 @@ class Pipeline:
         functions_path: str,
         input_path: str,
         output_path: str,
-        model_name: str = "",
+        model_name: str,
     ) -> None:
+        """Create end-to-end generation pipeline.
+
+        Args:
+            functions_path: Path to function definitions JSON.
+            input_path: Path to prompt tests JSON.
+            output_path: Path to write results JSON.
+            model_name: Hugging Face model id (empty string uses SDK default).
+        """
         self.functions_path: str = functions_path
         self.input_path: str = input_path
         self.output_path: str = output_path
@@ -70,7 +90,11 @@ class Pipeline:
         return unique
 
     def run(self) -> None:
-        """Build function-call results and skip invalid prompts."""
+        """Run selection + constrained decoding over all prompts.
+
+        Writes only successful results to output file.
+        Prompts that fail selection or decoding are skipped (stderr).
+        """
         prompt_items = load_prompt_items(self.input_path)
         function_definitions = self._deduplicate_definitions(
             load_function_definitions(self.functions_path)

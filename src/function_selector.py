@@ -1,4 +1,6 @@
 from __future__ import annotations
+from re import Pattern
+
 
 import math
 import re
@@ -13,14 +15,13 @@ from src.models import FunctionDefinition
 from src.prompt import BobThePrompter
 from src.math_utils import softmax
 
-# For N=5 candidates, 4.5/N == 0.90 (matches docstring of adaptive_threshold).
 _UNIFORM_MULTIPLIER = 4.5
 _TARGET_TOP_SOFTMAX_PROB = 0.9
 _TEMPERATURE_SCHEDULE = (1.0, 0.7, 0.5, 0.35, 0.25, 0.15, 0.1, 0.05)
 _LEXICAL_BONUS_WEIGHT = 5.0
 _NO_LEXICAL_SUPPORT_MIN_CONFIDENCE = 0.90
-_WORD_RE = re.compile(r"[a-z0-9]+")
-_STOPWORDS = {
+_WORD_RE: Pattern[str] = re.compile(r"[a-z0-9]+")
+_STOPWORDS: set[str] = {
     "a",
     "an",
     "and",
@@ -45,26 +46,15 @@ _STOPWORDS = {
     "with",
     "you",
 }
-_TERM_SYNONYMS: dict[str, tuple[str, ...]] = {
-    "add": ("sum", "plus"),
-    "sum": ("add", "plus"),
-    "plus": ("add", "sum"),
-    "multiply": ("product", "times"),
-    "product": ("multiply", "times"),
-    "times": ("multiply", "product"),
-    "greeting": ("greet",),
-    "hello": ("greet",),
-    "hi": ("greet",),
-}
 
 
 class FunctionSelectorError(Exception):
-    """Error handling during selection of the function"""
+    """Raised when function selection fails or is too low-confidence."""
 
 
 @dataclass(frozen=True)
 class _FunctionCandidate:
-    """Function candidate for selection"""
+    """Tokenized function-name continuation for selection."""
 
     name: str
     distinguishing_ids: tuple[
@@ -89,6 +79,16 @@ class FunctionSelector:
         model: Small_LLM_Model,
         functions: list[FunctionDefinition],
     ) -> None:
+        """Create selector for routing prompts to one function.
+
+        Args:
+            model: LLM wrapper used to score candidate continuations.
+            functions: Available function schemas.
+
+        Raises:
+            ValueError: If "functions" is empty.
+            FunctionSelectorError: If candidate tokenization is inconsistent.
+        """
         if not functions:
             raise ValueError("No functions provided for selection")
         self._model: Small_LLM_Model = model
@@ -144,20 +144,19 @@ class FunctionSelector:
 
     @staticmethod
     def _normalize_terms(text: str) -> set[str]:
+        """Normalize text into a set of comparable lexical terms."""
         terms = set(_WORD_RE.findall(text.lower().replace("_", " ")))
         filtered = {
             term for term in terms if term not in _STOPWORDS and term != "fn"
         }
-        expanded = set(filtered)
-        for term in filtered:
-            expanded.update(_TERM_SYNONYMS.get(term, ()))
-        return expanded
+        return set(filtered)
 
     def _lexical_overlap_count(
         self,
         user_prompt: str,
         function_definition: FunctionDefinition,
     ) -> int:
+        """Count shared normalized terms between prompt and function text."""
         prompt_terms = self._normalize_terms(user_prompt)
         if not prompt_terms:
             return 0
@@ -174,6 +173,7 @@ class FunctionSelector:
         user_prompt: str,
         function_definition: FunctionDefinition,
     ) -> float:
+        """Compute additive score bonus for lexical overlap."""
         overlap_count = self._lexical_overlap_count(
             user_prompt, function_definition
         )
@@ -189,6 +189,17 @@ class FunctionSelector:
         best_name: str,
         best_overlap_count: int,
     ) -> None:
+        """Validate selection probability against thresholds.
+
+        Args:
+            probs: Probability distribution over candidates.
+            best_index: Index of chosen candidate.
+            best_name: Chosen function name (for error messages).
+            best_overlap_count: Lexical overlap count for chosen function.
+
+        Raises:
+            FunctionSelectorError: If confidence is below threshold.
+        """
         confidence = float(probs[best_index])
         if confidence < self._threshold:
             raise FunctionSelectorError(
@@ -232,6 +243,15 @@ class FunctionSelector:
         base_ids: list[int],
         user_prompt: str,
     ) -> list[float]:
+        """Compute per-candidate selection scores from model logits.
+
+        Args:
+            base_ids: Token ids for selection prompt prefix.
+            user_prompt: Raw user request (for lexical bonus).
+
+        Returns:
+            List of scores aligned to "self._candidates".
+        """
         logits = self._model.get_logits_from_input_ids(base_ids)
         scores: list[float] = []
         groups: dict[int, list[int]] = defaultdict(list)
@@ -271,6 +291,15 @@ class FunctionSelector:
         base_ids: list[int],
         continuation_ids: tuple[int, ...],
     ) -> float:
+        """Score continuation tokens to break first-token ties.
+
+        Args:
+            base_ids: Prompt ids including the tied first token.
+            continuation_ids: Remaining token ids for candidate name.
+
+        Returns:
+            Weighted log-prob score for continuation (or -inf if impossible).
+        """
         if not continuation_ids:
             return 0.0
         weighted_score = 0.0
@@ -287,6 +316,17 @@ class FunctionSelector:
         return weighted_score
 
     def select(self, user_prompt: str) -> str:
+        """Select best matching function name for a user prompt.
+
+        Args:
+            user_prompt: Raw natural-language request.
+
+        Returns:
+            Selected function name.
+
+        Raises:
+            FunctionSelectorError: If no valid candidate or confidence too low.
+        """
         prompt = self._prompter.build_selection_prompt(user_prompt)
         base_ids = encoded_to_token_ids(self._model.encode(prompt))
         scores = self._candidate_scores(base_ids, user_prompt)
@@ -297,12 +337,11 @@ class FunctionSelector:
                 "No valid function candidate from logits"
             )
 
-        # Use true softmax probabilities for confidence gating.
-        # Temperature cooling (peak target) is only a selection heuristic.
         confidence_probs = softmax(scores)
 
-        selection_probs = self._probs_with_peak_target(scores)
-        best_index = selection_probs.index(max(selection_probs))
+        best_index = max(
+            range(len(confidence_probs)), key=confidence_probs.__getitem__
+        )
         best_name = self._candidates[best_index].name
         best_overlap_count = self._lexical_overlap_count(
             user_prompt, self._functions[best_index]

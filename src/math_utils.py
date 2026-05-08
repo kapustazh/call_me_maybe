@@ -3,7 +3,14 @@ import numpy as np
 
 
 def log_softmax(x: list[float]) -> list[float]:
-    """Convert raw scores to log-prob distribution (log-softmax)."""
+    """Compute log-softmax over 1-D scores.
+
+    Args:
+        x: Unnormalized scores (logits).
+
+    Returns:
+        Log-probabilities with same length as "x".
+    """
     if not x:
         return []
     a = np.asarray(x, dtype=np.float64)
@@ -18,7 +25,14 @@ def log_softmax(x: list[float]) -> list[float]:
 
 
 def softmax(x: list[float]) -> list[float]:
-    """Convert log-prob distribution to exp probability."""
+    """Compute softmax probabilities over 1-D scores.
+
+    Args:
+        x: Unnormalized scores (logits).
+
+    Returns:
+        Probabilities summing to 1.0 (empty list if "x" empty).
+    """
     log_probs = log_softmax(x)
     if not log_probs:
         return []
