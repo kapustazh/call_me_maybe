@@ -16,10 +16,11 @@ from src.prompt import BobThePrompter
 from src.math_utils import softmax
 
 _UNIFORM_MULTIPLIER = 4.5
-_TARGET_TOP_SOFTMAX_PROB = 0.9
+_TARGET_TOP_SOFTMAX_PROB = 0.90
 _TEMPERATURE_SCHEDULE = (1.0, 0.7, 0.5, 0.35, 0.25, 0.15, 0.1, 0.05)
 _LEXICAL_BONUS_WEIGHT = 5.0
 _NO_LEXICAL_SUPPORT_MIN_CONFIDENCE = 0.90
+_MAX_SELECTION_THRESHOLD = 0.90
 _WORD_RE: Pattern[str] = re.compile(r"[a-z0-9]+")
 _STOPWORDS: set[str] = {
     "a",
@@ -70,7 +71,7 @@ def adaptive_threshold(n_candidates: int) -> float:
     """
     if n_candidates <= 0:
         return 1.0
-    return min(_UNIFORM_MULTIPLIER / n_candidates, 0.9)
+    return min(_UNIFORM_MULTIPLIER / n_candidates, _MAX_SELECTION_THRESHOLD)
 
 
 class FunctionSelector:
@@ -337,17 +338,15 @@ class FunctionSelector:
                 "No valid function candidate from logits"
             )
 
-        confidence_probs = softmax(scores)
-
-        best_index = max(
-            range(len(confidence_probs)), key=confidence_probs.__getitem__
-        )
+        probs = softmax(scores)
+        best_index = max(range(len(probs)), key=probs.__getitem__)
         best_name = self._candidates[best_index].name
         best_overlap_count = self._lexical_overlap_count(
             user_prompt, self._functions[best_index]
         )
+
         self._validate_confidence(
-            confidence_probs,
+            probs,
             best_index,
             best_name,
             best_overlap_count,
