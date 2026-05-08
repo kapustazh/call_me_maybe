@@ -1,8 +1,4 @@
-"""Generic prompt snippets for parameter extraction (ordinal/index-based).
-
-Rules mirror ksr-style heuristics: quoted spans, template tails, paths/tokens,
-regex keywords — without branching on specific parameter names.
-"""
+"""Generic prompt snippets for parameter extraction (ordinal/index-based)."""
 
 from __future__ import annotations
 
@@ -20,9 +16,6 @@ _WORD_NUMBERS: dict[str, str] = {
     "seven": "7",
     "eight": "8",
     "nine": "9",
-    "ten": "10",
-    "eleven": "11",
-    "twelve": "12",
 }
 _WORD_NUMBER_RE = re.compile(
     r"\b(" + "|".join(_WORD_NUMBERS) + r")\b",
