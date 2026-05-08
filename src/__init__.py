@@ -35,26 +35,30 @@ Also helps sandboxed environments.
 import os
 from pathlib import Path
 
-_root: Path = Path(__file__).resolve().parent.parent
 
-os.environ.setdefault("UV_CACHE_DIR", str(_root / ".uv-cache"))
-os.environ.setdefault("TMPDIR", str(_root / ".tmp"))
+def init_runtime_dirs() -> None:
+    """Initialize local cache directories for runtime.
 
-_hf_root: Path = _root / ".hf"
-os.environ.setdefault("HF_HOME", str(_hf_root))
-os.environ.setdefault("TRANSFORMERS_CACHE", str(_hf_root / "transformers"))
-os.environ.setdefault("HUGGINGFACE_HUB_CACHE", str(_hf_root / "hub"))
+    Do not call at import-time. Call from CLI entrypoint.
+    """
 
-for _p in (
-    _root / ".uv-cache",
-    _root / ".tmp",
-    _hf_root,
-    _hf_root / "hub",
-    _hf_root / "transformers",
-):
-    _p.mkdir(parents=True, exist_ok=True)
+    root: Path = Path(__file__).resolve().parent.parent
 
-__version__ = 1.0
-__author__ = "kapustazh"
+    _ = os.environ.setdefault("UV_CACHE_DIR", str(root / ".uv-cache"))
+    _ = os.environ.setdefault("TMPDIR", str(root / ".tmp"))
 
-# __all__ = []
+    hf_root: Path = root / ".hf"
+    _ = os.environ.setdefault("HF_HOME", str(hf_root))
+    _ = os.environ.setdefault(
+        "TRANSFORMERS_CACHE", str(hf_root / "transformers")
+    )
+    _ = os.environ.setdefault("HUGGINGFACE_HUB_CACHE", str(hf_root / "hub"))
+
+    for p in (
+        root / ".uv-cache",
+        root / ".tmp",
+        hf_root,
+        hf_root / "hub",
+        hf_root / "transformers",
+    ):
+        p.mkdir(parents=True, exist_ok=True)

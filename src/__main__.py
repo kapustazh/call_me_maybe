@@ -27,6 +27,7 @@ Call me maybe. Not just maybe, please, call me I miss you so much.
 import argparse
 from argparse import ArgumentParser, Namespace
 
+from src import init_runtime_dirs
 from src.io_utils import JsonFileError, JsonValidationError
 from src.pipeline import Pipeline
 
@@ -70,6 +71,7 @@ def main() -> None:
     )
     args: Namespace = parser.parse_args()
     try:
+        init_runtime_dirs()
         pipeline = Pipeline(
             args.functions_definition,
             args.input,
