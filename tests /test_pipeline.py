@@ -104,7 +104,7 @@ class GoldenPipelineModel:
         pos = text.find(marker)
         if pos < 0:
             raise ValueError("decode prompt missing Task line")
-        rest = text[pos + len(marker) :]
+        rest = text[pos + len(marker):]
         return rest.split("\n", 1)[0].strip()
 
     def _assistant_decode_logits(self, text: str) -> list[float]:
@@ -267,6 +267,7 @@ def test_pipeline_drops_invalid_prompt_results(
         str(functions_path),
         str(input_path),
         str(output_path),
+        "fake-model",
         # selection_confidence_threshold=0.80,
     )
     pipeline.run()
@@ -313,6 +314,7 @@ def test_pipeline_matches_results_golden_file(
         str(functions_path),
         str(input_path),
         str(output_path),
+        "fake-model",
     )
     pipeline.run()
 

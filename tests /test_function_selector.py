@@ -112,7 +112,6 @@ def test_selects_best_name() -> None:
     selector = FunctionSelector(
         cast(Small_LLM_Model, FakeSelectorModel(mode="sum")),
         _definitions(),
-        confidence_threshold=0.60,
     )
     selected = selector.select("What is sum of 2 and 3?")
     assert selected == "fn_add_numbers"
@@ -122,7 +121,6 @@ def test_raises_on_low_confidence() -> None:
     selector = FunctionSelector(
         cast(Small_LLM_Model, FakeSelectorModel(mode="ambiguous")),
         _definitions(),
-        confidence_threshold=0.90,
     )
     try:
         _ = selector.select("do thing")
@@ -136,7 +134,6 @@ def test_model_selection_when_logits_favor_add() -> None:
     selector = FunctionSelector(
         cast(Small_LLM_Model, FakeSelectorModel(mode="biased_add")),
         _definitions(),
-        confidence_threshold=0.60,
     )
     selected = selector.select("Greet john")
     assert selected == "fn_add_numbers"
@@ -146,7 +143,6 @@ def test_lexical_prior_can_override_small_logit_bias() -> None:
     selector = FunctionSelector(
         cast(Small_LLM_Model, FakeSelectorModel(mode="prefer_square_small")),
         _definitions(),
-        confidence_threshold=0.60,
     )
     selected = selector.select("Greet john")
     assert selected == "fn_greet"
@@ -165,7 +161,6 @@ def test_single_function_does_not_crash() -> None:
     selector = FunctionSelector(
         cast(Small_LLM_Model, FakeSelectorModel(mode="ambiguous")),
         only,
-        confidence_threshold=0.01,
     )
     assert selector.select("How long is hello?") == "fn_strlen"
 
@@ -174,16 +169,75 @@ def test_prefix_token_continuation_uses_fn_boundary() -> None:
     selector = FunctionSelector(
         cast(Small_LLM_Model, FakePrefixTokenModel()),
         _definitions(),
-        confidence_threshold=0.60,
     )
     assert selector.select("What is sum of 2 and 3?") == "fn_add_numbers"
 
 
 def test_rejects_medium_confidence_without_lexical_support() -> None:
+    class MediumConfidenceModel:
+        def encode(self, text: str) -> list[list[int]]:
+            return [[ord(ch) for ch in text]]
+
+        def decode(self, ids: list[int] | object) -> str:
+            if isinstance(ids, list):
+                return "".join(chr(token_id) for token_id in ids)
+            raise TypeError("Expected list[int]")
+
+        def get_logits_from_input_ids(
+            self, _input_ids: list[int]
+        ) -> list[float]:
+            logits = [0.0] * 256
+            logits[ord("a")] = 3.0
+            return logits
+
+        def get_path_to_tokenizer_file(self) -> str:
+            return "unused"
+
+        def get_path_to_vocab_file(self) -> str:
+            return "unused"
+
+    number = FunctionParameter(type="number")
+    many = [
+        FunctionDefinition(
+            name="fn_add_numbers",
+            description="Add numbers",
+            parameters={"a": number, "b": number},
+            returns=number,
+        ),
+        FunctionDefinition(
+            name="fn_greet",
+            description="Greet by name",
+            parameters={"name": FunctionParameter(type="string")},
+            returns=FunctionParameter(type="string"),
+        ),
+        FunctionDefinition(
+            name="fn_reverse_string",
+            description="Reverse a string",
+            parameters={"s": FunctionParameter(type="string")},
+            returns=FunctionParameter(type="string"),
+        ),
+        FunctionDefinition(
+            name="fn_multiply_numbers",
+            description="Multiply numbers",
+            parameters={"a": number, "b": number},
+            returns=number,
+        ),
+        FunctionDefinition(
+            name="fn_get_square_root",
+            description="Square root",
+            parameters={"a": number},
+            returns=number,
+        ),
+        FunctionDefinition(
+            name="fn_is_even",
+            description="Even check",
+            parameters={"n": FunctionParameter(type="integer")},
+            returns=FunctionParameter(type="boolean"),
+        ),
+    ]
     selector = FunctionSelector(
-        cast(Small_LLM_Model, FakeSelectorModel(mode="medium_add")),
-        _definitions(),
-        confidence_threshold=0.60,
+        cast(Small_LLM_Model, MediumConfidenceModel()),
+        many,
     )
     try:
         _ = selector.select("What is purpose of live?")
@@ -194,10 +248,70 @@ def test_rejects_medium_confidence_without_lexical_support() -> None:
 
 
 def test_plus_synonym_provides_lexical_support_for_add() -> None:
+    class MediumConfidenceModel:
+        def encode(self, text: str) -> list[list[int]]:
+            return [[ord(ch) for ch in text]]
+
+        def decode(self, ids: list[int] | object) -> str:
+            if isinstance(ids, list):
+                return "".join(chr(token_id) for token_id in ids)
+            raise TypeError("Expected list[int]")
+
+        def get_logits_from_input_ids(
+            self, _input_ids: list[int]
+        ) -> list[float]:
+            logits = [0.0] * 256
+            logits[ord("a")] = 3.0
+            return logits
+
+        def get_path_to_tokenizer_file(self) -> str:
+            return "unused"
+
+        def get_path_to_vocab_file(self) -> str:
+            return "unused"
+
+    number = FunctionParameter(type="number")
+    many = [
+        FunctionDefinition(
+            name="fn_add_numbers",
+            description="Add numbers",
+            parameters={"a": number, "b": number},
+            returns=number,
+        ),
+        FunctionDefinition(
+            name="fn_greet",
+            description="Greet by name",
+            parameters={"name": FunctionParameter(type="string")},
+            returns=FunctionParameter(type="string"),
+        ),
+        FunctionDefinition(
+            name="fn_reverse_string",
+            description="Reverse a string",
+            parameters={"s": FunctionParameter(type="string")},
+            returns=FunctionParameter(type="string"),
+        ),
+        FunctionDefinition(
+            name="fn_multiply_numbers",
+            description="Multiply numbers",
+            parameters={"a": number, "b": number},
+            returns=number,
+        ),
+        FunctionDefinition(
+            name="fn_get_square_root",
+            description="Square root",
+            parameters={"a": number},
+            returns=number,
+        ),
+        FunctionDefinition(
+            name="fn_is_even",
+            description="Even check",
+            parameters={"n": FunctionParameter(type="integer")},
+            returns=FunctionParameter(type="boolean"),
+        ),
+    ]
     selector = FunctionSelector(
-        cast(Small_LLM_Model, FakeSelectorModel(mode="medium_add")),
-        _definitions(),
-        confidence_threshold=0.60,
+        cast(Small_LLM_Model, MediumConfidenceModel()),
+        many,
     )
-    selected = selector.select("What is three plus -2 equal to?")
+    selected = selector.select("What is three add -2 equal to?")
     assert selected == "fn_add_numbers"

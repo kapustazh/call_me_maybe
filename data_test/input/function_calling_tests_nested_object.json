@@ -1,0 +1,8 @@
+[
+  {
+    "prompt": "Create a user with payload {\"name\": \"alice\", \"age\": 30, \"active\": true}"
+  },
+  {
+    "prompt": "Send event 'signup' with payload {\"source\": \"landing\", \"campaign\": \"spring\"}"
+  }
+]
