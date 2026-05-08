@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import math
-from typing import Any
+from dataclasses import dataclass
+from typing import Any, Callable
 
 import numpy as np
 import numpy.typing as npt
@@ -13,7 +14,12 @@ from src.models import FunctionDefinition
 from src.prompt import BobThePrompter
 from src import prompt_value_extraction as pvex
 from src.tokenizer_vocab import TokenizerVocab
+from src.regex_value_resolver import RegexValueResolver
 from src.math_utils import log_softmax
+
+_SPACE_MARK = "Ġ"
+_NEWLINE_MARK = "Ċ"
+_UNKNOWN_MARK = "Äł"
 
 
 class ConstrainedDecodingError(RuntimeError):
@@ -30,6 +36,21 @@ class ConstrainedDecoder:
 
     _DEFAULT_MAX_NEW_TOKENS_STRING = 50
     _DEFAULT_MAX_NEW_TOKENS_NUMBER = 15
+
+    @dataclass(frozen=True)
+    class _ValueGenCtx:
+        current_ids: list[int]
+        param_type: str
+        is_regex_string: bool
+        prompt_text: str
+        string_plain_index: int
+        numeric_index: int
+        integer_only: bool
+
+    _ValueGenerator = Callable[
+        ["ConstrainedDecoder._ValueGenCtx"],
+        tuple[Any, list[int]],
+    ]
 
     def __init__(
         self,
@@ -56,6 +77,7 @@ class ConstrainedDecoder:
         self._max_new_tokens_string: int = max_new_tokens_string
         self._max_new_tokens_number: int = max_new_tokens_number
         self._prompter: BobThePrompter = BobThePrompter(functions)
+        self._regex_resolver = RegexValueResolver(model)
 
         self._piece_by_id: dict[int, str] = tokenizer_vocab.id_to_text_map()
 
@@ -81,6 +103,16 @@ class ConstrainedDecoder:
             list(self._build_safe_string_ids()),
             dtype=np.int32,
         )
+
+        self._value_generators: dict[
+            str, ConstrainedDecoder._ValueGenerator
+        ] = {
+            "string": self._gen_string,
+            "number": self._gen_number,
+            "integer": self._gen_number,
+            "boolean": self._gen_boolean,
+            "object": self._gen_object,
+        }
 
     def _insert_tokens(self, current_ids: list[int], text: str) -> list[int]:
         """Append token ids for literal "text" to current id sequence."""
@@ -224,31 +256,56 @@ class ConstrainedDecoder:
         numeric_index: int,
         integer_only: bool,
     ) -> tuple[Any, list[int]]:
-        if param_type == "string":
-            if is_regex_string:
-                return self._generate_regex_value(current_ids, prompt_text)
-            return self._generate_string_value(
-                current_ids,
-                prompt_text=prompt_text,
-                string_plain_index=string_plain_index,
+        generator = self._value_generators.get(param_type)
+        if generator is None:
+            raise ConstrainedDecodingError(
+                f"Unsupported parameter type: {param_type!r}"
             )
-        if param_type in ("number", "integer"):
-            return self._generate_number_value(
-                current_ids,
-                param_type=param_type,
-                prompt_text=prompt_text,
-                numeric_index=numeric_index,
-                integer_only=integer_only,
-            )
-        if param_type == "boolean":
-            return self._generate_boolean_value(current_ids)
-        if param_type == "object":
-            current_ids = self._insert_tokens(current_ids, "{}")
-            return {}, current_ids
-        return self._generate_string_value(
-            current_ids,
+        ctx = ConstrainedDecoder._ValueGenCtx(
+            current_ids=current_ids,
+            param_type=param_type,
+            is_regex_string=is_regex_string,
             prompt_text=prompt_text,
             string_plain_index=string_plain_index,
+            numeric_index=numeric_index,
+            integer_only=integer_only,
+        )
+        return generator(ctx)
+
+    def _gen_string(self, ctx: _ValueGenCtx) -> tuple[str, list[int]]:
+        if ctx.is_regex_string:
+            return self._generate_regex_value(ctx.current_ids, ctx.prompt_text)
+        return self._generate_string_value(
+            ctx.current_ids,
+            prompt_text=ctx.prompt_text,
+            string_plain_index=ctx.string_plain_index,
+        )
+
+    def _gen_number(self, ctx: _ValueGenCtx) -> tuple[int | float, list[int]]:
+        return self._generate_number_value(
+            ctx.current_ids,
+            param_type=ctx.param_type,
+            prompt_text=ctx.prompt_text,
+            numeric_index=ctx.numeric_index,
+            integer_only=ctx.integer_only,
+        )
+
+    def _gen_boolean(self, ctx: _ValueGenCtx) -> tuple[bool, list[int]]:
+        return self._generate_boolean_value(ctx.current_ids)
+
+    def _gen_object(
+        self, ctx: _ValueGenCtx
+    ) -> tuple[dict[str, object], list[int]]:
+        next_ids = self._insert_tokens(ctx.current_ids, "{}")
+        return {}, next_ids
+
+    @staticmethod
+    def _normalize_piece(piece: str) -> str:
+        """Normalize piece to remove control characters."""
+        return (
+            piece.replace(_SPACE_MARK, " ")
+            .replace(_NEWLINE_MARK, "")
+            .replace(_UNKNOWN_MARK, "")
         )
 
     def _generate_string_value(
@@ -277,10 +334,7 @@ class ConstrainedDecoder:
             if next_id == self._closing_quote_id:
                 break
             piece = self._piece_by_id.get(next_id, "")
-            if any(m in piece for m in ("Ġ", "Ċ", "Äł")):
-                piece = (
-                    piece.replace("Ġ", " ").replace("Ċ", "").replace("Äł", "")
-                )
+            piece = self._normalize_piece(piece)
             value_chars += piece
         inner = value_chars.strip().split("\\n")[0].strip()
         return inner, current_ids
@@ -388,31 +442,10 @@ class ConstrainedDecoder:
         current_ids: list[int],
         prompt_text: str,
     ) -> tuple[str, list[int]]:
-        pattern = pvex.regex_pattern_from_prompt(prompt_text)
-        if pattern is not None:
-            self._last_regex_value = pattern
-            current_ids = self._insert_tokens(current_ids, f'"{pattern}"')
-            return pattern, current_ids
-
-        candidates = pvex.regex_candidate_patterns()
-        scoring_text = (
-            f'For the request "{prompt_text}", '
-            f"the correct regex pattern is: "
-        )
-        scoring_ids = encoded_to_token_ids(self._model.encode(scoring_text))
-
-        best_candidate = candidates[0]
-        best_score = -math.inf
-        for candidate in candidates:
-            token_ids = encoded_to_token_ids(self._model.encode(candidate))
-            score = self._score_word(scoring_ids, token_ids)
-            if score > best_score:
-                best_score = score
-                best_candidate = candidate
-
-        self._last_regex_value = best_candidate
-        current_ids = self._insert_tokens(current_ids, f'"{best_candidate}"')
-        return best_candidate, current_ids
+        pattern = self._regex_resolver.resolve(prompt_text)
+        self._last_regex_value = pattern
+        current_ids = self._insert_tokens(current_ids, f'"{pattern}"')
+        return pattern, current_ids
 
     def _apply_mask(
         self,

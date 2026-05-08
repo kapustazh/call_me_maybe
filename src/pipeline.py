@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import json
 import sys
-import time
-from typing import Any
 
 from llm_sdk import Small_LLM_Model  # type: ignore
 
@@ -21,38 +19,8 @@ from src.io_utils import (
     write_function_results,
 )
 from src.models import FunctionDefinition, FunctionResult
+from src.render import RenderError, SplitRenderer
 from src.tokenizer_vocab import TokenizerVocab
-
-_WRIER_DELAY = 0.03
-
-# _DEBUG_FILE = f"{__file__}_{time.time()}.txt"
-
-
-def _write_char_by_char(text: str, *, delay: float = _WRIER_DELAY) -> None:
-    """Write text char-by-char to stdout for visual feedback.
-
-    Args:
-        text: Text to write.
-        delay: Per-character delay in seconds.
-    """
-    for c in text:
-        sys.stdout.write(c)
-        sys.stdout.flush()
-        time.sleep(delay)
-    # with open(_DEBUG_FILE, "a") as f:
-    #     f.write(text + "\n")
-
-
-def _format_params(parameters: dict[str, Any]) -> str:
-    """Format parameter dict for human-readable progress output.
-
-    Args:
-        parameters: Parameter mapping for one function call.
-
-    Returns:
-        JSON string without ASCII escaping.
-    """
-    return json.dumps(parameters, ensure_ascii=False)
 
 
 class Pipeline:
@@ -97,7 +65,7 @@ class Pipeline:
         """
         prompt_items = load_prompt_items(self.input_path)
         function_definitions = self._deduplicate_definitions(
-            load_function_definitions(self.functions_path)
+            load_function_definitions(self.functions_path),
         )
         function_by_name = {fd.name: fd for fd in function_definitions}
 
@@ -120,50 +88,76 @@ class Pipeline:
         total = len(prompt_items)
         out: list[FunctionResult] = []
         skipped_count: int = 0
-        for idx, item in enumerate(prompt_items, 1):
-            _write_char_by_char(f"[{idx}/{total}] Processing: {item.prompt}\n")
-            try:
-                selected_name = selector.select(item.prompt)
-                function_definition = function_by_name.get(selected_name)
-                if function_definition is None:
-                    raise ValueError(
-                        f"Selected unknown function name: {selected_name}"
-                    )
-                parameters = decoder.decode_parameters(
-                    item.prompt,
-                    function_definition,
-                )
-                result = FunctionResult(
-                    prompt=item.prompt,
-                    name=selected_name,
-                    parameters=parameters,
-                )
-                out.append(result)
-                _write_char_by_char(
-                    f"  \u2192 {selected_name}"  # arrow symbol
-                    f"({_format_params(result.parameters)})\n",
-                )
-            except (
-                FunctionSelectorError,
-                ConstrainedDecodingError,
-                ValueError,
-            ) as exc:
-                print(
-                    f"  \u2717 Skipped: {exc}", file=sys.stderr
-                )  # cross symbol
-                skipped_count += 1
-                continue
 
-        write_function_results(self.output_path, out)
-        print(
-            f"\nDone. {len(out)}/{total} results written"
-            f" to {self.output_path}",
-        )
-        if skipped_count:
-            print(
-                (
-                    f"Skipped {skipped_count} prompt(s) due to "
-                    "routing/decoding errors"
-                ),
-                file=sys.stderr,
+        def run(renderer: SplitRenderer | None) -> None:
+            nonlocal skipped_count
+            for idx, item in enumerate(prompt_items, 1):
+                header = f"[{idx}/{total}] Processing: {item.prompt}"
+                if renderer is not None:
+                    renderer.log_info_stream(header + "\n")
+                else:
+                    print(header)
+                try:
+                    selected_name = selector.select(item.prompt)
+                    function_definition = function_by_name.get(selected_name)
+                    if function_definition is None:
+                        raise ValueError(
+                            f"Selected unknown function name: {selected_name}"
+                        )
+                    parameters = decoder.decode_parameters(
+                        item.prompt,
+                        function_definition,
+                    )
+                    result = FunctionResult(
+                        prompt=item.prompt,
+                        name=selected_name,
+                        parameters=parameters,
+                    )
+                    out.append(result)
+                    params_json = json.dumps(
+                        result.parameters,
+                        ensure_ascii=False,
+                    )
+                    ok_line = f"  \u2192 {selected_name}({params_json})"
+                    if renderer is not None:
+                        renderer.log_ok_stream(ok_line + "\n")
+                    else:
+                        print(ok_line)
+                except (
+                    FunctionSelectorError,
+                    ConstrainedDecodingError,
+                    ValueError,
+                ) as exc:
+                    err_line = f"  \u2717 Skipped: {exc}"
+                    if renderer is not None:
+                        renderer.log_err_stream(err_line + "\n")
+                    else:
+                        print(err_line, file=sys.stderr)
+                    skipped_count += 1
+                    continue
+
+            write_function_results(self.output_path, out)
+            done_msg = (
+                f"\nDone. {len(out)}/{total} results written"
+                f" to {self.output_path}\n"
             )
+            skip_msg = (
+                f"Skipped {skipped_count} prompt(s) due to "
+                "routing/decoding errors\n"
+            )
+            if renderer is not None:
+                renderer.log_info_stream(done_msg)
+                if skipped_count:
+                    renderer.log_err_stream(skip_msg)
+                renderer.log_info_stream("\n[q] or [Esc] when done to quit\n")
+                renderer.wait_until_quit()
+            else:
+                print(done_msg, end="")
+                if skipped_count:
+                    print(skip_msg, end="", file=sys.stderr)
+
+        try:
+            with SplitRenderer() as renderer:
+                run(renderer)
+        except (RenderError, Exception):
+            run(None)
