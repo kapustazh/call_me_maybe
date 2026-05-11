@@ -40,7 +40,7 @@ After all prompts finish and the result file is written, the program **waits**
 so you can read the log. Press **q** or **Esc** once to see a short **confirm**
 line; press **q** or **Esc** again to leave. Any other key **cancels** that
 confirm and returns to the log. Then the terminal is restored to usual
-line-editing mode.
+line-editing mode. Pressing **Ctrl+C** in that waiting state exits cleanly too.
 
 Details and timing defaults live in `src/render.py` if you want to tweak them.
 

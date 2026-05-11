@@ -19,7 +19,7 @@ from src.io_utils import (
     write_function_results,
 )
 from src.models import FunctionDefinition, FunctionResult
-from src.render import RenderError, SplitRenderer
+from src.render import PipelineUIRenderer
 from src.tokenizer_vocab import TokenizerVocab
 
 
@@ -42,7 +42,7 @@ class Pipeline:
         self.functions_path: str = functions_path
         self.input_path: str = input_path
         self.output_path: str = output_path
-        self._model_name: str = model_name
+        self._model_name: str = model_name.strip()
 
     @staticmethod
     def _deduplicate_definitions(
@@ -71,7 +71,7 @@ class Pipeline:
 
         model = (
             Small_LLM_Model(self._model_name)
-            if self._model_name.strip()
+            if self._model_name
             else Small_LLM_Model()
         )
         tokenizer_vocab = TokenizerVocab.from_model(model)
@@ -86,11 +86,11 @@ class Pipeline:
         )
 
         total = len(prompt_items)
-        out: list[FunctionResult] = []
-        skipped_count: int = 0
 
-        def run(renderer: SplitRenderer | None) -> None:
-            nonlocal skipped_count
+        def _execute(renderer: PipelineUIRenderer | None) -> None:
+            out: list[FunctionResult] = []
+            skipped_count: int = 0
+
             for idx, item in enumerate(prompt_items, 1):
                 header = f"[{idx}/{total}] Processing: {item.prompt}"
                 if renderer is not None:
@@ -136,7 +136,15 @@ class Pipeline:
                     skipped_count += 1
                     continue
 
-            write_function_results(self.output_path, out)
+            if not out:
+                print(
+                    "Warning: no successful results — output file "
+                    "not written.",
+                    file=sys.stderr,
+                )
+            else:
+                write_function_results(self.output_path, out)
+
             done_msg = (
                 f"\nDone. {len(out)}/{total} results written"
                 f" to {self.output_path}\n"
@@ -157,7 +165,10 @@ class Pipeline:
                     print(skip_msg, end="", file=sys.stderr)
 
         try:
-            with SplitRenderer() as renderer:
-                run(renderer)
-        except (RenderError, Exception):
-            run(None)
+            PipelineUIRenderer.run_interactive(_execute)
+        except Exception as exc:
+            print(
+                f"TUI unavailable, falling back to plain output: {exc}",
+                file=sys.stderr,
+            )
+            _execute(None)
