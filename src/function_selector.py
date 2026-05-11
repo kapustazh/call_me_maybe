@@ -64,10 +64,17 @@ class _FunctionCandidate:
 
 
 def adaptive_threshold(n_candidates: int) -> float:
-    """Scale threshold with candidate count.
+    """Minimum softmax probability required for acceptance vs candidate count.
 
-    Matches 0.90 for 5 candidates, scales inversely for more.
-    Capped at 0.90 for small candidate sets.
+    Caps at ``_MAX_SELECTION_THRESHOLD``. Roughly uniform baseline scaled by
+    candidate cardinality.
+
+    Args:
+        n_candidates: Number of competing function names.
+
+    Returns:
+        Confidence threshold in ``[0, 1]``. Returns ``1.0`` if
+        ``n_candidates <= 0`` (effectively impossible pass).
     """
     if n_candidates <= 0:
         return 1.0
@@ -75,6 +82,13 @@ def adaptive_threshold(n_candidates: int) -> float:
 
 
 class FunctionSelector:
+    """Score-first-token logits plus lexical bonus to route prompts to tools.
+
+    Builds tokenized continuations after a shared prefix from
+    :class:`~src.prompt.BobThePrompter`, adds overlap-based tie-breakers,
+    softmax-temps until peak mass target, then validates confidence.
+    """
+
     def __init__(
         self,
         model: Small_LLM_Model,
@@ -100,7 +114,14 @@ class FunctionSelector:
         self._candidates: list[_FunctionCandidate] = self._build_candidates()
 
     def _build_candidates(self) -> list[_FunctionCandidate]:
-        """Tokenize token-level continuation after selection prompt prefix."""
+        """Tokenize each function name after the shared selection prefix.
+
+        Returns:
+            Parallel list to ``self._functions`` with distinguishing token ids.
+
+        Raises:
+            FunctionSelectorError: If names cannot align with prefix tokens.
+        """
         candidates: list[_FunctionCandidate] = []
         prefix = self._prompter.function_name_prefix()
         prefix_ids = (
@@ -145,7 +166,15 @@ class FunctionSelector:
 
     @staticmethod
     def _normalize_terms(text: str) -> set[str]:
-        """Normalize text into a set of comparable lexical terms."""
+        """Extract lowercase alphanumeric tokens from text for overlap checks.
+
+        Args:
+            text: Arbitrary natural-language or identifier string.
+
+        Returns:
+            Set of tokens with underscores treated as spaces and stopwords
+            removed (including literal ``fn`` token).
+        """
         terms = set(_WORD_RE.findall(text.lower().replace("_", " ")))
         filtered = {
             term for term in terms if term not in _STOPWORDS and term != "fn"
@@ -157,7 +186,15 @@ class FunctionSelector:
         user_prompt: str,
         function_definition: FunctionDefinition,
     ) -> int:
-        """Count shared normalized terms between prompt and function text."""
+        """Count normalized terms shared between prompt and function metadata.
+
+        Args:
+            user_prompt: Raw user request.
+            function_definition: Candidate tool schema.
+
+        Returns:
+            Intersection size (non-negative integer).
+        """
         prompt_terms = self._normalize_terms(user_prompt)
         if not prompt_terms:
             return 0
@@ -174,7 +211,15 @@ class FunctionSelector:
         user_prompt: str,
         function_definition: FunctionDefinition,
     ) -> float:
-        """Compute additive score bonus for lexical overlap."""
+        """Additive score bump proportional to lexical overlap count.
+
+        Args:
+            user_prompt: Raw user request.
+            function_definition: Candidate tool schema.
+
+        Returns:
+            Weighted bonus (zero when no overlap).
+        """
         overlap_count = self._lexical_overlap_count(
             user_prompt, function_definition
         )
@@ -221,13 +266,33 @@ class FunctionSelector:
     def _softmax_at_temperature(
         scores: list[float], temperature: float
     ) -> list[float]:
+        """Apply softmax to scores scaled by ``temperature``.
+
+        Args:
+            scores: Unnormalized logits or energies.
+            temperature:
+                Positive temperature; lower yields sharper distribution.
+
+        Returns:
+            Probability vector of same length as ``scores``.
+
+        Raises:
+            ValueError: If ``temperature`` is not positive.
+        """
         if temperature <= 0:
             raise ValueError("temperature must be positive")
         scaled = [s / temperature for s in scores]
         return softmax(scaled)
 
     def _probs_with_peak_target(self, scores: list[float]) -> list[float]:
-        """Cool temperature until the top softmax mass reaches the target."""
+        """Softmax at decreasing temperatures until top mass reaches target.
+
+        Args:
+            scores: Candidate logits before normalization.
+
+        Returns:
+            Final probability distribution used for winner selection.
+        """
         if self._peak_target >= 1.0:
             return softmax(scores)
         probs = self._softmax_at_temperature(scores, _TEMPERATURE_SCHEDULE[0])

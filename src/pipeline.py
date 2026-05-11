@@ -24,6 +24,19 @@ from src.tokenizer_vocab import TokenizerVocab
 
 
 class Pipeline:
+    """End-to-end batch runner: load JSON, route prompts, decode parameters.
+
+    Loads prompt tests and function definitions, runs :class:`FunctionSelector`
+    and :class:`ConstrainedDecoder` per prompt, writes successful
+    :class:`FunctionResult` rows. Uses :class:`PipelineUIRenderer` when TTY
+    available; otherwise prints to stdout/stderr.
+
+    Attributes:
+        functions_path: Path to function definitions JSON.
+        input_path: Path to prompt tests JSON.
+        output_path: Path for results JSON output.
+    """
+
     def __init__(
         self,
         functions_path: str,
@@ -48,7 +61,17 @@ class Pipeline:
     def _deduplicate_definitions(
         definitions: list[FunctionDefinition],
     ) -> list[FunctionDefinition]:
-        """Keep first occurrence of each function name."""
+        """Keep first occurrence of each function name.
+
+        Later duplicates with the same ``name`` are dropped so probability mass
+        is not split across identical tools.
+
+        Args:
+            definitions: Parsed function definitions (possibly with repeats).
+
+        Returns:
+            Ordered list with unique ``name`` values.
+        """
         seen: set[str] = set()
         unique: list[FunctionDefinition] = []
         for fd in definitions:
@@ -88,6 +111,11 @@ class Pipeline:
         total = len(prompt_items)
 
         def _execute(renderer: PipelineUIRenderer | None) -> None:
+            """Process all prompts; stream logs and write results.
+
+            Args:
+                renderer: Interactive UI logger, or ``None`` for plain print.
+            """
             out: list[FunctionResult] = []
             skipped_count: int = 0
 

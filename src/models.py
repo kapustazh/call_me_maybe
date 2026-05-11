@@ -2,6 +2,7 @@ from __future__ import annotations
 from pydantic import BaseModel, ConfigDict, StringConstraints, Field
 from typing import Any, Literal, Annotated
 
+#: Stripped, non-empty string fields for Pydantic models.
 NonEmptyStr = Annotated[
     str, StringConstraints(strip_whitespace=True, min_length=1)
 ]

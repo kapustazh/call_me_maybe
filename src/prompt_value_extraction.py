@@ -110,7 +110,15 @@ def _literal_regex_target_from_quotes(
     prompt: str,
     quoted_values: list[str],
 ) -> str | None:
-    """Infer literal regex target from quoted span context in prompt."""
+    """Infer escaped literal target when prompt ties quotes to ``word`` role.
+
+    Args:
+        prompt: Raw user prompt.
+        quoted_values: Strings extracted by :func:`quoted_spans`.
+
+    Returns:
+        Regex fragment matching the quoted literal, or ``None``.
+    """
     if not quoted_values:
         return None
 
@@ -148,7 +156,15 @@ def quoted_spans(prompt: str) -> list[str]:
 
 
 def template_tail_if_braces(prompt: str) -> str | None:
-    """Return colon tail if it contains braces (template-like literal)."""
+    """Return text after colon if it looks like a template with braces.
+
+    Args:
+        prompt: Raw user prompt.
+
+    Returns:
+        Stripped tail substring when ``{`` or ``}`` appears after ``:``,
+        else ``None``.
+    """
     m = re.search(r":\s*(.+)$", prompt)
     if m and ("{" in m.group(1) or "}" in m.group(1)):
         return m.group(1).strip()
@@ -156,7 +172,14 @@ def template_tail_if_braces(prompt: str) -> str | None:
 
 
 def first_path_windows(prompt: str) -> str | None:
-    """Extract first Windows or POSIX path-like substring from prompt."""
+    """Extract first Windows ``C:\\`` or POSIX ``/`` path-like span.
+
+    Args:
+        prompt: Raw user prompt.
+
+    Returns:
+        Normalized path string, or ``None`` if no match.
+    """
     pm = re.search(r'([A-Za-z]:\\[^\s\'"]+|/[^\s\'"]+)', prompt)
     if not pm:
         return None
@@ -164,7 +187,14 @@ def first_path_windows(prompt: str) -> str | None:
 
 
 def token_pattern_values(prompt: str) -> list[str]:
-    """Extract token-like values (paths, dashed identifiers) from prompt."""
+    """Collect path-like or dashed identifier tokens from prompt.
+
+    Args:
+        prompt: Raw user prompt.
+
+    Returns:
+        Ordered non-overlapping matches from ``_TOKEN_PATTERN``.
+    """
     out: list[str] = []
     for match in _TOKEN_PATTERN.finditer(prompt):
         token_val = next(g for g in match.groups() if g is not None)
@@ -175,7 +205,14 @@ def token_pattern_values(prompt: str) -> list[str]:
 
 
 def symbol_from_keywords(prompt: str) -> str | None:
-    """Map common words ("dash", "underscore") to the intended symbol."""
+    """Map spoken words (``dash``, ``hash``) to single-character symbols.
+
+    Args:
+        prompt: Raw user prompt (lower search).
+
+    Returns:
+        Intended symbol, or ``None`` if no keyword hit.
+    """
     lower = prompt.lower()
     for word, symbol in _SYMBOL_WORDS:
         if word in lower:
@@ -184,7 +221,14 @@ def symbol_from_keywords(prompt: str) -> str | None:
 
 
 def plain_text_tail(prompt: str) -> str | None:
-    """Extract a short plain-text value from prompt tail when unambiguous."""
+    """Heuristic: pull short trailing literal when no quotes or paths present.
+
+    Args:
+        prompt: Raw user prompt.
+
+    Returns:
+        Candidate plain string for first string parameter, or ``None``.
+    """
     if not prompt.strip():
         return None
     if re.search(r"['\"]", prompt):
@@ -399,7 +443,11 @@ def parse_number_text(
 
 
 def regex_candidate_patterns() -> list[str]:
-    """Return ordered unique regex patterns from built-in keyword table."""
+    """Enumerate built-in regex patterns from keyword table (deduped).
+
+    Returns:
+        Ordered pattern strings used when scoring regex alternatives.
+    """
     seen: set[str] = set()
     ordered: list[str] = []
     for _, pattern in _REGEX_KEYWORDS:

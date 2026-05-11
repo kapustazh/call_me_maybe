@@ -7,7 +7,14 @@ from src.models import FunctionDefinition
 
 
 class Prefix:
-    """Prefix helpers for tool-name token alignment."""
+    """Utilities for longest-prefix alignment across function name strings.
+
+    Used when building selection prompts so tokenizer continuations share a
+    stable anchor (e.g. ``fn`` for ``fn_*`` names).
+
+    Methods:
+        longest_common_prefix: LC-prefix via sorted first/last scan.
+    """
 
     @staticmethod
     def longest_common_prefix(strs: list[str]) -> str:
@@ -46,11 +53,14 @@ class BobThePrompter:
         self._functions = functions
 
     def function_name_prefix(self) -> str:
-        """Shared prefix used in selection prompt.
+        """Return shared prefix where the selection prompt stops before branch.
 
-        Keep it tokenization-friendly for Qwen function names: current tools
-        start with "fn_..." but continuation tokens are aligned after "fn"
-        (e.g. "_add", "_get"), not after "fn_".
+        Tokenization-friendly for ``fn_*`` tools: aligns continuation tokens
+        after ``fn`` when all names share that prefix shape.
+
+        Returns:
+            Longest shared prefix string used in selection prompt tail, or
+            empty string when undetermined.
         """
         names = [fn.name for fn in self._functions]
         if not names:

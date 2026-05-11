@@ -9,6 +9,12 @@ from src.tokenizer_vocab import encoded_to_token_ids
 
 
 class _ModelLike(Protocol):
+    """Minimal LLM interface for regex scoring (encode + logits).
+
+    Implementations must match :class:`llm_sdk.Small_LLM_Model` usage in this
+    package (duck typing via Protocol).
+    """
+
     def encode(self, text: str) -> object: ...
 
     def get_logits_from_input_ids(
@@ -25,9 +31,26 @@ class RegexValueResolver:
     """
 
     def __init__(self, model: _ModelLike) -> None:
+        """Store model reference for scoring.
+
+        Args:
+            model: Encoder + logits provider used to rank regex candidates.
+        """
         self._model = model
 
     def resolve(self, prompt_text: str) -> str:
+        """Pick regex pattern string for the prompt.
+
+        Uses explicit pattern extraction when possible; otherwise scores a
+        fixed candidate list with token log-probabilities.
+
+        Args:
+            prompt_text: Full user natural-language request.
+
+        Returns:
+            Regex pattern string (non-empty; falls back to digits-class pattern
+            when candidate list empty).
+        """
         pattern = pvex.regex_pattern_from_prompt(prompt_text)
         if pattern is not None:
             return pattern
@@ -53,6 +76,16 @@ class RegexValueResolver:
         return best_candidate
 
     def _score_word(self, base_ids: list[int], word_ids: list[int]) -> float:
+        """Sum log-probabilities of generating ``word_ids`` after ``base_ids``.
+
+        Args:
+            base_ids: Token ids of prompt prefix already fed to the model.
+            word_ids: Target continuation token ids (e.g. one regex literal).
+
+        Returns:
+            Total log-probability along the continuation. Negative infinity
+            if ``word_ids`` is empty or any step is impossible.
+        """
         if not word_ids:
             return -math.inf
 

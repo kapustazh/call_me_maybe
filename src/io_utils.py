@@ -9,15 +9,35 @@ from src.models import FunctionDefinition, FunctionResult, PromptItem
 
 
 class JsonFileError(ValueError):
-    """Raised when a JSON file cannot be read or parsed."""
+    """Raised when a JSON file cannot be read or parsed.
+
+    Attributes:
+        args: Standard ``Exception`` tuple; message describes missing path,
+            OS error, or JSON syntax location.
+    """
 
 
 class JsonValidationError(ValueError):
-    """Raised when parsed JSON does not match the expected schema."""
+    """Raised when parsed JSON fails Pydantic schema validation.
+
+    Attributes:
+        args: Message includes file path and validation error details.
+    """
 
 
 def load_json_file(path: str | Path) -> Any:
-    """Load a JSON file and return decoded Python data with clear errors."""
+    """Load and decode one JSON file.
+
+    Args:
+        path: Filesystem path to a ``.json`` file.
+
+    Returns:
+        Decoded Python object (typically ``dict`` or ``list``).
+
+    Raises:
+        JsonFileError: If the path is missing, not a file, empty, unreadable,
+            or contains invalid JSON.
+    """
     json_path = Path(path)
 
     if not json_path.exists():
@@ -45,7 +65,18 @@ def load_json_file(path: str | Path) -> Any:
 
 
 def load_function_definitions(path: str | Path) -> list[FunctionDefinition]:
-    """Load and validate function definition list."""
+    """Load function definitions JSON and validate against schema.
+
+    Args:
+        path: Path to JSON array of function definition objects.
+
+    Returns:
+        Validated list of :class:`FunctionDefinition`.
+
+    Raises:
+        JsonFileError: If the file cannot be read or parsed.
+        JsonValidationError: If structure does not match the schema.
+    """
     data = load_json_file(path)
     try:
         return TypeAdapter(list[FunctionDefinition]).validate_python(data)
@@ -57,7 +88,18 @@ def load_function_definitions(path: str | Path) -> list[FunctionDefinition]:
 
 
 def load_prompt_items(path: str | Path) -> list[PromptItem]:
-    """Load and validate prompt item list."""
+    """Load prompt tests JSON and validate against schema.
+
+    Args:
+        path: Path to JSON array of prompt objects.
+
+    Returns:
+        Validated list of :class:`PromptItem`.
+
+    Raises:
+        JsonFileError: If the file cannot be read or parsed.
+        JsonValidationError: If structure does not match the schema.
+    """
     data = load_json_file(path)
     try:
         return TypeAdapter(list[PromptItem]).validate_python(data)
@@ -71,7 +113,15 @@ def write_function_results(
     path: str | Path,
     results: list[FunctionResult],
 ) -> None:
-    """Write final result array with only prompt, name, parameters keys."""
+    """Serialize results to UTF-8 JSON with indentation.
+
+    Creates parent directories if needed. Each row is the dumped
+    :class:`FunctionResult` (prompt, name, parameters).
+
+    Args:
+        path: Output file path.
+        results: Successful pipeline rows to write.
+    """
     out_path = Path(path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     output_records = [result.model_dump() for result in results]
