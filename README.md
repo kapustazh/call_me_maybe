@@ -29,7 +29,7 @@ the session is interactive; otherwise plain stdout/stderr).
 ## Terminal UI
 
 When stdout is an interactive terminal, the run uses a **split-screen** view:
-progress and messages on one side, a small **branding / animation** panel on the
+progress and messages on one side, a small **sidebar art / animation** panel on the
 other, with **color** where the terminal supports it. Text appears in a
 **streaming** style so long lines do not dump all at once.
 

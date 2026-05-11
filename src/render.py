@@ -1,4 +1,4 @@
-"""Textual pipeline UI: streaming log, branding sidebar, quit confirmation."""
+"""Textual pipeline UI: streaming log, sidebar art, quit confirmation."""
 
 from __future__ import annotations
 
@@ -13,13 +13,12 @@ from rich.align import Align
 from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.containers import Container, Vertical, VerticalScroll
-from textual.css.query import NoMatches
 from textual.events import Key
 from textual.widgets import Static
 
 # Layout
 _SIDEBAR_WIDTH_CELLS_DEFAULT = 20
-_SIDEBAR_BRANDING_INNER_HEIGHT = 5
+_SIDEBAR_ART_INNER_HEIGHT = 5
 
 # Log stream → UI thread (batches)
 _LOG_STREAM_CHARS_PER_UI_BATCH = 42
@@ -29,8 +28,12 @@ _LOG_SCROLL_COALESCE_MIDLINE_CHUNKS = True
 _SCROLL_COALESCE_TICK_SEC = 0.08
 _CAT_ANIMATION_TICK_SEC = 0.3
 
-# Rich styles (sidebar filler behind signature / cat)
-_SIDEBAR_BRANDING_FILL_STYLE = "rgb(48,48,48)"
+# Rich terminal styles (Rich markup mini-language).
+_RICH_STYLE_SIDEBAR_FILL = "rgb(48,48,48)"
+_RICH_STYLE_BOLD_CYAN = "bold cyan"
+_RICH_STYLE_LOG_INFO = "cyan"
+_RICH_STYLE_LOG_OK = "green"
+_RICH_STYLE_LOG_ERR = "red"
 
 # Copy + assets
 _QUIT_CONFIRMATION_BAR_TEXT = (
@@ -47,15 +50,16 @@ _CAT_SPRITE_FRAME_LINES: tuple[tuple[str, ...], ...] = (
 KAPUSTAZH_SIGNATURE = "kapustazh"
 _TITLE_CALL_ME_MAYBE = "Call me maybe..."
 
-# Log color pair ids → Rich style.
-_LOG_COLOR_PAIR_TO_RICH_STYLE: dict[int, str] = {
-    1: "cyan",
-    2: "green",
-    3: "red",
-}
 PAIR_INFO = 1
 PAIR_OK = 2
 PAIR_ERR = 3
+
+# Log color pair ids → Rich style.
+_LOG_COLOR_PAIR_TO_RICH_STYLE: dict[int, str] = {
+    PAIR_INFO: _RICH_STYLE_LOG_INFO,
+    PAIR_OK: _RICH_STYLE_LOG_OK,
+    PAIR_ERR: _RICH_STYLE_LOG_ERR,
+}
 
 
 # PipelineUIRenderer — public facade used by `pipeline.py`
@@ -197,9 +201,9 @@ class PipelineUIRenderer:
 
 
 class PipelineApp(App[None]):
-    """Textual app: streaming log pane plus branding sidebar.
+    """Textual app: streaming log pane plus sidebar art.
 
-    Layout: docked right column (``#title_box`` + ``#branding``) plus log
+    Layout: docked right column (``#title_box`` + ``#sidebar_art``) plus log
     pane in ``VerticalScroll``.     Cat sprite animates on
     ``_CAT_ANIMATION_TICK_SEC``. When
     ``_LOG_SCROLL_COALESCE_MIDLINE_CHUNKS`` is True, a
@@ -210,11 +214,13 @@ class PipelineApp(App[None]):
     """
 
     CSS = f"""
+    /* Right sidebar: title + art panel; pinned to terminal right */
     #right_column {{
-        dock: right;
+        dock: right; /* pin the sidebar to the right of the terminal */
         width: {_SIDEBAR_WIDTH_CELLS_DEFAULT};
         height: 100%;
     }}
+    /* Top strip of sidebar: app title */
     #title_box {{
         height: auto;
         min-height: 1;
@@ -223,13 +229,15 @@ class PipelineApp(App[None]):
         color: $foreground;
         border: solid $boost;
     }}
-    #branding {{
+    /* Below title: grows to fill column (signature + cat area) */
+    #sidebar_art {{
         width: 100%;
         height: 1fr;
         background: $surface;
         color: $foreground;
         border: solid $boost;
     }}
+    /* Main area left of sidebar: streaming log */
     #log_pane {{
         width: 1fr;
         height: 100%;
@@ -237,24 +245,27 @@ class PipelineApp(App[None]):
         border-left: solid $boost;
         border-bottom: solid $boost;
     }}
+    /* Scroll viewport for log content */
     #log_container {{
         width: 100%;
         height: 100%;
         background: transparent;
-        overflow-y: auto;
+        overflow-y: auto; /* allow the log container to scroll */
     }}
+    /* Rich Text widget that receives log updates */
     #log {{
         width: 100%;
         height: auto;
         padding: 0 1;
         background: transparent;
     }}
+    /* Quit confirmation bar; hidden until code sets display */
     #quit_hint {{
-        dock: bottom;
+        dock: bottom; /* position the quit hint at the bottom */
         height: auto;
         background: $surface;
         color: $warning;
-        display: none;
+        display: none; /* hide the quit hint by default */
     }}
     """
 
@@ -282,20 +293,20 @@ class PipelineApp(App[None]):
         self._scroll_pending: bool = False
 
     def compose(self) -> ComposeResult:
-        """Yield the widget tree (title, branding, quit hint, log pane)."""
+        """Yield the widget tree (title, sidebar art, quit hint, log pane)."""
         with Vertical(id="right_column"):
             yield Static(
                 Align.right(
-                    Text(_TITLE_CALL_ME_MAYBE, style="bold cyan"),
+                    Text(_TITLE_CALL_ME_MAYBE, style=_RICH_STYLE_BOLD_CYAN),
                 ),
                 id="title_box",
                 markup=False,
             )
             yield Static(
-                self._branding_renderable(
+                self._sidebar_art_renderable(
                     inner_width=max(6, self._right_width - 2),
                 ),
-                id="branding",
+                id="sidebar_art",
                 markup=False,
             )
         yield Static(
@@ -313,20 +324,36 @@ class PipelineApp(App[None]):
                 )
 
     def on_mount(self) -> None:
-        """Lock sidebar width, schedule timers, start worker."""
+        """Mount: sidebar width, renderer, timers, pipeline worker."""
+        self._apply_locked_sidebar_width()
+        self._attach_pipeline_renderer()
+        self._schedule_mount_timers()
+        self._schedule_after_first_paint()
+
+    def _apply_locked_sidebar_width(self) -> None:
+        """Pin ``#right_column`` width to the configured sidebar width."""
         rw = self._right_width
         rc = self.query_one("#right_column", Vertical)
         rc.styles.width = rw
         rc.styles.min_width = rw
         rc.styles.max_width = rw
+
+    def _attach_pipeline_renderer(self) -> None:
+        """Create the :class:`PipelineUIRenderer` bound to this app."""
         self._renderer = PipelineUIRenderer(self)
+
+    def _schedule_mount_timers(self) -> None:
+        """Register scroll coalesce (optional) and cat animation intervals."""
         if _LOG_SCROLL_COALESCE_MIDLINE_CHUNKS:
             self.set_interval(
                 _SCROLL_COALESCE_TICK_SEC,
                 self._tick_scroll_coalesce,
             )
         self.set_interval(_CAT_ANIMATION_TICK_SEC, self._tick_cat)
-        self.call_after_refresh(self._paint_branding)
+
+    def _schedule_after_first_paint(self) -> None:
+        """After layout: sidebar art repaint, then start pipeline worker."""
+        self.call_after_refresh(self._paint_sidebar_art)
         self.call_after_refresh(self._start_worker)
 
     def _start_worker(self) -> None:
@@ -345,40 +372,31 @@ class PipelineApp(App[None]):
         finally:
             self.call_from_thread(self.exit)
 
-    def _branding_inner_width(self) -> int:
-        """Return inner width of ``#branding`` in cells (``>= 6``)."""
-        try:
-            br = self.query_one("#branding", Static)
-            cw = br.container_size.width
-            if cw > 4:
-                return max(6, cw)
-        except NoMatches:
-            pass
+    def _sidebar_art_inner_width(self) -> int:
+        """Return inner width of ``#sidebar_art`` in cells (``>= 6``)."""
+        br = self.query_one("#sidebar_art", Static)
+        cw = br.container_size.width
+        if cw > 4:
+            return max(6, cw)
         return max(6, self._right_width - 2)
 
     def _sync_log_update(self, log_text: Text) -> None:
         """Push ``log_text`` to ``#log``."""
-        try:
-            self.query_one("#log", Static).update(log_text)
-        except NoMatches:
-            return
+        self.query_one("#log", Static).update(log_text)
 
     def _scroll_log_now(self) -> None:
         """Scroll ``#log_container`` to bottom; clear ``_scroll_pending``."""
         self._scroll_pending = False
-        try:
-            sc = self.query_one("#log_container", VerticalScroll)
-        except NoMatches:
-            return
+        sc = self.query_one("#log_container", VerticalScroll)
         sc.scroll_end(animate=False, x_axis=False)
 
     @staticmethod
-    def _compose_brand_line(
+    def _compose_sidebar_art_line(
         overlay: str | None,
         width: int,
         *,
         right_align: bool,
-        fill_style: str = _SIDEBAR_BRANDING_FILL_STYLE,
+        fill_style: str = _RICH_STYLE_SIDEBAR_FILL,
     ) -> Text:
         """One sidebar row: space fill plus optional overlay (bold cyan)."""
         base = " " * width
@@ -391,7 +409,6 @@ class PipelineApp(App[None]):
         end = start + len(ov)
         if start > 0:
             line.append(base[:start], style=fill_style)
-        cyan = "bold cyan"
         n = len(ov)
         i = 0
         while i < n:
@@ -400,31 +417,35 @@ class PipelineApp(App[None]):
             while j < n and (ov[j] == " ") == is_space:
                 j += 1
             if is_space:
-                line.append(base[start + i : start + j], style=fill_style)
+                seg_a = start + i
+                seg_b = start + j
+                line.append(base[seg_a:seg_b], style=fill_style)
             else:
-                line.append(ov[i:j], style=cyan)
+                line.append(ov[i:j], style=_RICH_STYLE_BOLD_CYAN)
             i = j
         if end < width:
             line.append(base[end:width], style=fill_style)
         return line
 
-    def _branding_renderable(self, *, inner_width: int | None = None) -> Align:
+    def _sidebar_art_renderable(
+        self, *, inner_width: int | None = None
+    ) -> Align:
         """Sidebar block: signature + filler + cat (bottom-aligned).
 
         Args:
             inner_width: Row width in cells. Use during :meth:`compose`
-                (``#branding`` not queryable yet). ``None`` → measured width.
+                (``#sidebar_art``). ``None`` → measured width.
         """
         w = (
             inner_width
             if inner_width is not None
-            else self._branding_inner_width()
+            else self._sidebar_art_inner_width()
         )
-        h = _SIDEBAR_BRANDING_INNER_HEIGHT
+        h = _SIDEBAR_ART_INNER_HEIGHT
         cat = self._cat_frame
         cat_h = len(cat)
         cat_top = h - cat_h
-        compose = self._compose_brand_line
+        compose = self._compose_sidebar_art_line
         block = Text()
         nl = Text("\n")
         for y in range(h):
@@ -439,48 +460,36 @@ class PipelineApp(App[None]):
                 block.append(nl)
         return Align(block, "left", vertical="bottom")
 
-    def _paint_branding(self) -> None:
-        """Update ``#branding`` with latest sidebar block."""
-        try:
-            br = self.query_one("#branding", Static)
-        except NoMatches:
-            return
-        br.update(self._branding_renderable())
+    def _paint_sidebar_art(self) -> None:
+        """Update ``#sidebar_art`` with latest sidebar block."""
+        br = self.query_one("#sidebar_art", Static)
+        br.update(self._sidebar_art_renderable())
 
     def _tick_scroll_coalesce(self) -> None:
-        """Drain deferred midline scroll (interval only registered if coalescing on)."""
+        """Flush deferred midline scroll when coalesce timer fires."""
         if self._scroll_pending:
             self._scroll_log_now()
 
     def _tick_cat(self) -> None:
         """Advance cat sprite frame and repaint sidebar."""
         self._cat_frame = next(self._cat_iter)
-        self._paint_branding()
+        self._paint_sidebar_art()
 
     def arm_quit_wait(self) -> None:
-        """Enable quit confirmation; defocus log so keys reach :meth:`on_key`."""
+        """Arm quit flow; unfocus log so keys reach ``on_key``."""
         self._quit_waiting = True
         self._quit_armed = False
-        try:
-            log = self.query_one("#log", Static)
-            log.can_focus = False
-        except NoMatches:
-            pass
+        log = self.query_one("#log", Static)
+        log.can_focus = False
         self.set_focus(None)
 
     def _show_quit_bar(self) -> None:
         """Show the quit-confirmation bar."""
-        try:
-            self.query_one("#quit_hint", Static).display = True
-        except NoMatches:
-            return
+        self.query_one("#quit_hint", Static).display = True
 
     def _hide_quit_bar(self) -> None:
         """Hide the quit-confirmation bar."""
-        try:
-            self.query_one("#quit_hint", Static).display = False
-        except NoMatches:
-            return
+        self.query_one("#quit_hint", Static).display = False
 
     @staticmethod
     def _is_quit_key(event: Key) -> bool:
