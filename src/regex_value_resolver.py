@@ -1,25 +1,14 @@
 from __future__ import annotations
 
 import math
-from typing import Protocol
+
+from llm_sdk import Small_LLM_Model  # type: ignore
 
 from src import prompt_value_extraction as pvex
 from src.math_utils import log_softmax
 from src.tokenizer_vocab import encoded_to_token_ids
 
-
-class _ModelLike(Protocol):
-    """Minimal LLM interface for regex scoring (encode + logits).
-
-    Implementations must match :class:`llm_sdk.Small_LLM_Model` usage in this
-    package (duck typing via Protocol).
-    """
-
-    def encode(self, text: str) -> object: ...
-
-    def get_logits_from_input_ids(
-        self, input_ids: list[int]
-    ) -> list[float]: ...
+_DEFAULT_NUMBER_REGEX: str = r"\d+"
 
 
 class RegexValueResolver:
@@ -28,15 +17,16 @@ class RegexValueResolver:
     Strategy:
     - If prompt contains an explicit/obvious pattern, return it.
     - Else score a small candidate set using model log-prob and pick best.
+    - If that list is empty, use digit-only pattern (numeric literals).
     """
 
-    def __init__(self, model: _ModelLike) -> None:
+    def __init__(self, model: Small_LLM_Model) -> None:
         """Store model reference for scoring.
 
         Args:
             model: Encoder + logits provider used to rank regex candidates.
         """
-        self._model = model
+        self._model: Small_LLM_Model = model
 
     def resolve(self, prompt_text: str) -> str:
         """Pick regex pattern string for the prompt.
@@ -48,8 +38,9 @@ class RegexValueResolver:
             prompt_text: Full user natural-language request.
 
         Returns:
-            Regex pattern string (non-empty; falls back to digits-class pattern
-            when candidate list empty).
+            Regex pattern string (non-empty). If heuristic extraction fails and
+            there are no LM-scorable candidates, returns digit-sequence pattern
+            (numeric literals only).
         """
         pattern = pvex.regex_pattern_from_prompt(prompt_text)
         if pattern is not None:
@@ -57,7 +48,7 @@ class RegexValueResolver:
 
         candidates = pvex.regex_candidate_patterns()
         if not candidates:
-            return r"\d+"
+            return _DEFAULT_NUMBER_REGEX
 
         scoring_text = (
             f'For the request "{prompt_text}", '

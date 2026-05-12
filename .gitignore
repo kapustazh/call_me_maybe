@@ -225,3 +225,6 @@ new_data_set/output/
 subject.txt
 en.subject.txt
 en.subject.pdf
+
+#test data
+test_data/*

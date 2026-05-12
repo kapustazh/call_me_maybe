@@ -19,7 +19,6 @@ help:
 	@printf "$(YELLOW)  install      - install dependencies and envirnonment$(RESET)\n"
 	@printf "$(YELLOW)  run          - run man module (with ARGS=\"...\")$(RESET)\n"
 	@printf "$(YELLOW)  lint         - run linter (flake8 + mypy)$(RESET)\n"
-	@printf "$(YELLOW)  test         - run tests in tests/$(RESET)\n"
 	@printf "$(YELLOW)  clean        - delete cache$(RESET)\n"
 
 init-dirs:
@@ -53,7 +52,4 @@ lint-strict: install
 	@uv run flake8 --jobs 1 $(SRC_DIR)
 	@uv run mypy $(SRC_DIR) --strict
 
-test: 
-	@PYTHONPATH=. uv run pytest -q
-
-.PHONY: help init-dirs install run debug clean lint lint-strict test
+.PHONY: help init-dirs install run debug clean lint lint-strict

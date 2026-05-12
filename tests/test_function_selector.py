@@ -1,8 +1,10 @@
+from pathlib import Path
 from typing import cast
 
 from llm_sdk import Small_LLM_Model  # type: ignore
 
 from src.function_selector import FunctionSelector, FunctionSelectorError
+from src.io_utils import load_function_definitions
 from src.models import FunctionDefinition, FunctionParameter
 
 
@@ -315,3 +317,13 @@ def test_plus_synonym_provides_lexical_support_for_add() -> None:
     )
     selected = selector.select("What is three add -2 equal to?")
     assert selected == "fn_add_numbers"
+
+
+def test_load_exercise_functions_definition_json_file() -> None:
+    root = Path(__file__).resolve().parents[1]
+    path = root / "data/exercise_input/functions_definition.json"
+    defs = load_function_definitions(path)
+    assert len(defs) == 7
+    assert defs[0].name == "fn_add_numbers"
+    assert defs[0].parameters["a"].type == "number"
+    assert defs[3].parameters["n"].type == "integer"

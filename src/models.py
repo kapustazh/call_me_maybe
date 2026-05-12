@@ -1,8 +1,13 @@
 from __future__ import annotations
-from pydantic import BaseModel, ConfigDict, StringConstraints, Field
-from typing import Any, Literal, Annotated
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+)
+from typing import Annotated, Any, Literal
 
-#: Stripped, non-empty string fields for Pydantic models.
+
 NonEmptyStr = Annotated[
     str, StringConstraints(strip_whitespace=True, min_length=1)
 ]
@@ -22,7 +27,8 @@ class FunctionParameter(BaseModel):
     """Parameter schema entry for a function definition.
 
     Attributes:
-        type: JSON type name expected for this parameter.
+        type: JSON type name for this parameter (number, integer, boolean,
+            string, or object).
     """
 
     type: Literal["number", "integer", "boolean", "string", "object"]

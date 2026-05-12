@@ -1,0 +1,38 @@
+[
+  {
+    "prompt": "Create a user with payload {\"name\": \"alice\", \"age\": 30, \"active\": true}"
+  },
+  {
+    "prompt": "Send event 'signup' with payload {\"source\": \"landing\", \"campaign\": \"spring\"}"
+  },
+  {
+    "prompt": "Create a user with attribute {\"name\": \"alice\"}"
+  },
+  {
+    "prompt": "Send event 'page_view' with payload {\"path\": \"/pricing\", \"ms\": 240}"
+  },
+  {
+    "prompt": "Send event \"purchase_complete\" with payload {\"sku\": \"X1\", \"qty\": 2, \"currency\": \"USD\"}"
+  },
+  {
+    "prompt": "Send event 'error' with payload {\"code\": 504, \"retry\": false, \"region\": \"eu-west\"}"
+  },
+  {
+    "prompt": "Create a user with attribute {\"id\": 42, \"locale\": \"en-GB\", \"verified\": true}"
+  },
+  {
+    "prompt": "Register a user whose attribute is {\"email\": \"bob@example.dev\", \"newsletter\": false}"
+  },
+  {
+    "prompt": "Create a user with attribute {\"tags\": [\"staff\", \"beta\"], \"tier\": \"gold\"}"
+  },
+  {
+    "prompt": "Send event 'checkout' with payload {\"cart_id\": \"abc-123\", \"total\": 19.99}"
+  },
+  {
+    "prompt": "Create a user with attribute {}"
+  },
+  {
+    "prompt": "Send event impression with payload {\"banner_id\": \"hero-top\", \"experiment\": \"A\"}"
+  }
+]

@@ -16,8 +16,6 @@ from src.prompt import BobThePrompter
 from src.math_utils import softmax
 
 _UNIFORM_MULTIPLIER = 4.5
-_TARGET_TOP_SOFTMAX_PROB = 0.90
-_TEMPERATURE_SCHEDULE = (1.0, 0.7, 0.5, 0.35, 0.25, 0.15, 0.1, 0.05)
 _LEXICAL_BONUS_WEIGHT = 5.0
 _NO_LEXICAL_SUPPORT_MIN_CONFIDENCE = 0.90
 _MAX_SELECTION_THRESHOLD = 0.90
@@ -86,7 +84,7 @@ class FunctionSelector:
 
     Builds tokenized continuations after a shared prefix from
     :class:`~src.prompt.BobThePrompter`, adds overlap-based tie-breakers,
-    softmax-temps until peak mass target, then validates confidence.
+    then validates confidence on a softmax over candidate scores.
     """
 
     def __init__(
@@ -109,7 +107,6 @@ class FunctionSelector:
         self._model: Small_LLM_Model = model
         self._functions: list[FunctionDefinition] = functions
         self._threshold: float = adaptive_threshold(len(functions))
-        self._peak_target: float = _TARGET_TOP_SOFTMAX_PROB
         self._prompter: BobThePrompter = BobThePrompter(functions)
         self._candidates: list[_FunctionCandidate] = self._build_candidates()
 
@@ -261,48 +258,6 @@ class FunctionSelector:
                 f"{confidence:.3f} < "
                 f"{_NO_LEXICAL_SUPPORT_MIN_CONFIDENCE:.3f} for '{best_name}'"
             )
-
-    @staticmethod
-    def _softmax_at_temperature(
-        scores: list[float], temperature: float
-    ) -> list[float]:
-        """Apply softmax to scores scaled by ``temperature``.
-
-        Args:
-            scores: Unnormalized logits or energies.
-            temperature:
-                Positive temperature; lower yields sharper distribution.
-
-        Returns:
-            Probability vector of same length as ``scores``.
-
-        Raises:
-            ValueError: If ``temperature`` is not positive.
-        """
-        if temperature <= 0:
-            raise ValueError("temperature must be positive")
-        scaled = [s / temperature for s in scores]
-        return softmax(scaled)
-
-    def _probs_with_peak_target(self, scores: list[float]) -> list[float]:
-        """Softmax at decreasing temperatures until top mass reaches target.
-
-        Args:
-            scores: Candidate logits before normalization.
-
-        Returns:
-            Final probability distribution used for winner selection.
-        """
-        if self._peak_target >= 1.0:
-            return softmax(scores)
-        probs = self._softmax_at_temperature(scores, _TEMPERATURE_SCHEDULE[0])
-        peak = max(probs) if probs else 0.0
-        for t in _TEMPERATURE_SCHEDULE[1:]:
-            if peak >= self._peak_target:
-                break
-            probs = self._softmax_at_temperature(scores, t)
-            peak = max(probs)
-        return probs
 
     def _candidate_scores(
         self,
