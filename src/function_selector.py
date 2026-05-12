@@ -16,7 +16,7 @@ from src.prompt import BobThePrompter
 from src.math_utils import softmax
 
 _UNIFORM_MULTIPLIER = 4.5
-_LEXICAL_BONUS_WEIGHT = 5.0
+_LEXICAL_BONUS_WEIGHT = 4.5
 _NO_LEXICAL_SUPPORT_MIN_CONFIDENCE = 0.90
 _MAX_SELECTION_THRESHOLD = 0.90
 _WORD_RE: Pattern[str] = re.compile(r"[a-z0-9]+")

@@ -80,22 +80,6 @@ make run ARGS='--functions_definition data_test/input/functions_definition.json 
   --output data_test/output/function_calling_results.json'
 ```
 
-```bash
-# 1) Extended prompt set under data_test/
-uv run python -m src \
-  --functions_definition data_test/input/functions_definition.json \
-  --input data_test/input/function_calling_tests.json \
-  --output data_test/output/function_calling_results.json
-```
-
-```bash
-# 2) Nested-object-style definitions under data_test_nested/
-uv run python -m src \
-  --functions_definition data_test_nested/functions_definition_nested_object.json \
-  --input data_test_nested/function_calling_tests.json \
-  --output data_test_nested/output/function_calling_results.json
-```
-
 **Model selection:** pass Hugging Face model id to `Small_LLM_Model`.
 
 - CLI: `--model_name "HF/model-id"` (empty/whitespace keeps SDK default)
