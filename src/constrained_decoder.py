@@ -127,6 +127,23 @@ class ConstrainedDecoder:
             "boolean": self._gen_boolean,
             "object": self._gen_object,
         }
+        self._token_visual: Callable[[str, int], None] | None = None
+
+    def set_token_visual(
+        self, callback: Callable[[str, int], None] | None
+    ) -> None:
+        """Register optional ``(piece, pair)`` sink for TUI token trace.
+
+        Args:
+            callback: Invoked on worker thread after each emitted token
+                fragment; ``pair`` is :class:`LogColorPair` value (often
+                ``LogColorPair.INFO`` / ``1``). ``None`` disables tracing.
+        """
+        self._token_visual = callback
+
+    def _emit_token_piece(self, piece: str, *, pair: int = 1) -> None:
+        if self._token_visual is not None:
+            self._token_visual(piece, pair)
 
     def _insert_tokens(self, current_ids: list[int], text: str) -> list[int]:
         """Decode ``text`` with the model encoder and append ids to a copy.
@@ -139,7 +156,14 @@ class ConstrainedDecoder:
             New list: ``current_ids`` followed by encoded ``text``.
         """
         text_token_ids = encoded_to_token_ids(self._model.encode(text))
-        return current_ids[:] + text_token_ids
+        out = current_ids[:]
+        for tid in text_token_ids:
+            out.append(tid)
+            self._emit_token_piece(
+                self._normalize_piece(self._piece_by_id.get(tid, "")),
+                pair=1,
+            )
+        return out
 
     def decode_parameters(
         self,
@@ -445,10 +469,11 @@ class ConstrainedDecoder:
             masked = self._apply_mask(logits, self._safe_string_ids_arr)
             next_id = int(np.argmax(masked))
             current_ids.append(next_id)
-            if next_id == self._closing_quote_id:
-                break
             piece = self._piece_by_id.get(next_id, "")
             piece = self._normalize_piece(piece)
+            self._emit_token_piece(piece, pair=1)
+            if next_id == self._closing_quote_id:
+                break
             value_chars += piece
         inner = value_chars.strip().split("\\n")[0].strip()
         return inner, current_ids
@@ -504,6 +529,7 @@ class ConstrainedDecoder:
             next_piece = self._piece_by_id.get(next_id, "").strip()
             if not next_piece or not all(c in valid_chars for c in next_piece):
                 break
+            self._emit_token_piece(next_piece, pair=1)
             value_str += next_piece
             current_ids.append(next_id)
 

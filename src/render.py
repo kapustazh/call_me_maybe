@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import random
 import signal
 import sys
 import threading
+import time
 from collections.abc import Callable
+from enum import IntEnum
 from itertools import cycle
 from types import FrameType
 
@@ -28,14 +31,19 @@ _LOG_SCROLL_COALESCE_MIDLINE_CHUNKS = True
 _SCROLL_COALESCE_TICK_SEC = 0.08
 _CAT_ANIMATION_TICK_SEC = 0.3
 
-# Rich terminal styles (Rich markup mini-language).
+# Token-by-token TUI delay
+_TOKEN_VIS_MEAN_DELAY_SEC = 0.01
+_TOKEN_VIS_MAX_DELAY_SEC = 0.35
+
+# Rich terminal styles
 _RICH_STYLE_SIDEBAR_FILL = "rgb(48,48,48)"
 _RICH_STYLE_BOLD_CYAN = "bold cyan"
 _RICH_STYLE_LOG_INFO = "cyan"
 _RICH_STYLE_LOG_OK = "green"
 _RICH_STYLE_LOG_ERR = "red"
+_RICH_STYLE_LOG_PLAIN = "default"
 
-# Copy + assets
+# Assets
 _QUIT_CONFIRMATION_BAR_TEXT = (
     " Press q or Esc again to quit." " Any other key closes this bar. "
 )
@@ -50,16 +58,27 @@ _CAT_SPRITE_FRAME_LINES: tuple[tuple[str, ...], ...] = (
 KAPUSTAZH_SIGNATURE = "kapustazh"
 _TITLE_CALL_ME_MAYBE = "Call me maybe..."
 
-PAIR_INFO = 1
-PAIR_OK = 2
-PAIR_ERR = 3
 
-# Log color pair ids → Rich style.
+class LogColorPair(IntEnum):
+    """Semantic id for log stream Rich style (see :func:`log_pair_style`)."""
+
+    PLAIN = 0
+    INFO = 1
+    OK = 2
+    ERR = 3
+
+
 _LOG_COLOR_PAIR_TO_RICH_STYLE: dict[int, str] = {
-    PAIR_INFO: _RICH_STYLE_LOG_INFO,
-    PAIR_OK: _RICH_STYLE_LOG_OK,
-    PAIR_ERR: _RICH_STYLE_LOG_ERR,
+    LogColorPair.PLAIN: _RICH_STYLE_LOG_PLAIN,
+    LogColorPair.INFO: _RICH_STYLE_LOG_INFO,
+    LogColorPair.OK: _RICH_STYLE_LOG_OK,
+    LogColorPair.ERR: _RICH_STYLE_LOG_ERR,
 }
+
+
+def log_pair_style(pair: LogColorPair | int) -> str:
+    """Rich style string for ``pair``; unknown id → empty string."""
+    return _LOG_COLOR_PAIR_TO_RICH_STYLE.get(int(pair), "")
 
 
 # PipelineUIRenderer — public facade used by `pipeline.py`
@@ -153,7 +172,7 @@ class PipelineUIRenderer:
         else:
             self._app._scroll_pending = True
 
-    def log_stream(self, text: str, *, pair: int) -> None:
+    def log_stream(self, text: str, *, pair: LogColorPair | int) -> None:
         """Stream ``text`` to the log in fixed-size batches.
 
         Each batch hops to the UI thread via ``call_from_thread``; batch
@@ -161,11 +180,11 @@ class PipelineUIRenderer:
 
         Args:
             text: Source text. Empty input is a no-op.
-            pair: Color pair id; see ``_LOG_COLOR_PAIR_TO_RICH_STYLE``.
+            pair: :class:`LogColorPair` or int; see :func:`log_pair_style`.
         """
         if not text:
             return
-        style = _LOG_COLOR_PAIR_TO_RICH_STYLE.get(pair, "")
+        style = log_pair_style(pair)
         n = _LOG_STREAM_CHARS_PER_UI_BATCH
         length = len(text)
         pos = 0
@@ -179,17 +198,49 @@ class PipelineUIRenderer:
             )
             pos = end
 
+    def log_token_visual(
+        self,
+        piece: str,
+        *,
+        pair: LogColorPair | int,
+    ) -> None:
+        """Append one tokenizer fragment; sleep with mean delay on worker.
+
+        Uses exponential inter-arrival so average spacing equals
+        ``_TOKEN_VIS_MEAN_DELAY_SEC``. Runs from worker thread: UI update
+        first, then sleep here (does not block Textual loop).
+
+        Args:
+            piece: Text to show (often one subword); empty becomes one space.
+            pair: :class:`LogColorPair` or int; see :func:`log_pair_style`.
+        """
+        chunk = piece if piece else " "
+        style = log_pair_style(pair)
+        self._app.call_from_thread(
+            self._append_log,
+            chunk,
+            style=style,
+            tail=True,
+        )
+        mean = _TOKEN_VIS_MEAN_DELAY_SEC
+        if mean > 0:
+            delay = min(
+                random.expovariate(1.0 / mean),
+                _TOKEN_VIS_MAX_DELAY_SEC,
+            )
+            time.sleep(delay)
+
     def log_info_stream(self, text: str) -> None:
         """Stream ``text`` styled as info (cyan)."""
-        self.log_stream(text, pair=PAIR_INFO)
+        self.log_stream(text, pair=LogColorPair.INFO)
 
     def log_ok_stream(self, text: str) -> None:
         """Stream ``text`` styled as ok (green)."""
-        self.log_stream(text, pair=PAIR_OK)
+        self.log_stream(text, pair=LogColorPair.OK)
 
     def log_err_stream(self, text: str) -> None:
         """Stream ``text`` styled as error (red)."""
-        self.log_stream(text, pair=PAIR_ERR)
+        self.log_stream(text, pair=LogColorPair.ERR)
 
     def wait_until_quit(self) -> None:
         """Block until the user confirms quit (q/Esc twice or SIGINT)."""
@@ -198,8 +249,6 @@ class PipelineUIRenderer:
 
 
 # PipelineApp (Textual TUI)
-
-
 class PipelineApp(App[None]):
     """Textual app: streaming log pane plus sidebar art.
 
