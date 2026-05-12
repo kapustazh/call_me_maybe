@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass
 from typing import Any, Callable
 
@@ -9,13 +8,12 @@ import numpy.typing as npt
 
 from llm_sdk import Small_LLM_Model  # type: ignore
 
-from src.tokenizer_vocab import encoded_to_token_ids
 from src.models import FunctionDefinition
 from src.prompt import BobThePrompter
 from src import prompt_value_extraction as pvex
-from src.tokenizer_vocab import TokenizerVocab
+from src.tokenizer_vocab import TokenizerVocab, encoded_to_token_ids
 from src.regex_value_resolver import RegexValueResolver
-from src.math_utils import log_softmax
+from src.math_utils import cumulative_sequence_logprob
 
 _SPACE_MARK = "Ġ"
 _NEWLINE_MARK = "Ċ"
@@ -23,15 +21,21 @@ _UNKNOWN_MARK = "Äł"
 
 
 class ConstrainedDecodingError(RuntimeError):
-    """Raised when constrained decoding cannot produce a valid value."""
+    """Error when constrained decoding cannot finish a valid JSON literal.
+
+    Typical causes include an unsupported schema type, tokenizer issues, or
+    impossible token masks during greedy generation.
+    """
 
 
 class ConstrainedDecoder:
-    """Decode JSON-typed parameters with token-level constraints.
+    """Fill in a tool-call JSON body under hard token constraints.
 
-    Given chosen function schema and user prompt, decoder generates JSON object
-    '{"name": ..., "parameters": {...}}'. Restricts next-token choices so each
-    literal value stays valid for expected type.
+    The model only sees allowed next tokens when emitting string bodies,
+    numbers, and booleans, so the result stays syntactically valid for the
+    chosen :class:`~src.models.FunctionDefinition`. The high-level shape is
+    ``{"name": ..., "parameters": {...}}`` (the name and keys are inserted;
+    values are generated or taken from prompt heuristics).
     """
 
     _DEFAULT_MAX_NEW_TOKENS_STRING = 50
@@ -39,18 +43,22 @@ class ConstrainedDecoder:
 
     @dataclass(frozen=True)
     class _ValueGenCtx:
-        """State passed into per-type value generators during JSON fill-in.
+        """Bundle of everything a per-type value generator needs at one step.
+
+        Built inside :meth:`_generate_value` and passed to the small ``_gen_*``
+        helpers so they do not need long parameter lists.
 
         Attributes:
             current_ids: Token ids generated so far for the decode prefix.
             param_type: JSON schema type key (``string``, ``number``, etc.).
-            is_regex_string: True when this string parameter uses regex
-                resolver.
-            prompt_text: Original user prompt (for heuristics / regex).
-            string_plain_index: Index among non-regex string parameters (-1 if
-                N/A).
-            numeric_index: Index among numeric parameters (-1 if N/A).
-            integer_only: Whether integer schema forbids fractional literals.
+            is_regex_string: Whether this string parameter is routed through
+                the regex resolver.
+            prompt_text: Original user prompt (for heuristics and regex).
+            string_plain_index: Ordinal among non-regex string parameters, or
+                ``-1`` when this parameter is not in that group.
+            numeric_index: Ordinal among numeric parameters, or ``-1`` when
+                this parameter is not numeric.
+            integer_only: If ``True``, fractional numeric literals are invalid.
         """
 
         current_ids: list[int]
@@ -74,18 +82,24 @@ class ConstrainedDecoder:
         max_new_tokens_string: int = _DEFAULT_MAX_NEW_TOKENS_STRING,
         max_new_tokens_number: int = _DEFAULT_MAX_NEW_TOKENS_NUMBER,
     ) -> None:
-        """Initialize decoder and precompute token masks.
+        """Wire the model, vocabulary, and precomputed allow-lists for decoding.
+
+        Quote, boolean, safe-string, and numeric token id sets are built once
+        so greedy steps can mask logits cheaply.
 
         Args:
             model: LLM wrapper providing logits and encoding helpers.
-            tokenizer_vocab: Token-to-text mapping for mask construction.
-            functions: Function definitions (used to build decode prompt).
-            max_new_tokens_string: Max tokens for string literal generation.
-            max_new_tokens_number: Max tokens for numeric literal generation.
+            tokenizer_vocab: Token id to decoded piece, for mask construction.
+            functions: Tool schemas used to build the decode prompt template.
+            max_new_tokens_string: Cap on greedy steps inside a string literal.
+            max_new_tokens_number: Cap on greedy steps for a sampled number.
 
         Raises:
-            ConstrainedDecodingError:
-                If tokenizer cannot produce quote token id for string literals.
+            ConstrainedDecodingError: If the tokenizer yields no id for a
+                double-quote character (string literals cannot be closed).
+
+        Returns:
+            None
         """
         self._model: Small_LLM_Model = model
         self._max_new_tokens_string: int = max_new_tokens_string
@@ -127,23 +141,6 @@ class ConstrainedDecoder:
             "boolean": self._gen_boolean,
             "object": self._gen_object,
         }
-        self._token_visual: Callable[[str, int], None] | None = None
-
-    def set_token_visual(
-        self, callback: Callable[[str, int], None] | None
-    ) -> None:
-        """Register optional ``(piece, pair)`` sink for TUI token trace.
-
-        Args:
-            callback: Invoked on worker thread after each emitted token
-                fragment; ``pair`` is :class:`LogColorPair` value (often
-                ``LogColorPair.INFO`` / ``1``). ``None`` disables tracing.
-        """
-        self._token_visual = callback
-
-    def _emit_token_piece(self, piece: str, *, pair: int = 1) -> None:
-        if self._token_visual is not None:
-            self._token_visual(piece, pair)
 
     def _insert_tokens(self, current_ids: list[int], text: str) -> list[int]:
         """Decode ``text`` with the model encoder and append ids to a copy.
@@ -159,10 +156,6 @@ class ConstrainedDecoder:
         out = current_ids[:]
         for tid in text_token_ids:
             out.append(tid)
-            self._emit_token_piece(
-                self._normalize_piece(self._piece_by_id.get(tid, "")),
-                pair=1,
-            )
         return out
 
     def decode_parameters(
@@ -471,7 +464,6 @@ class ConstrainedDecoder:
             current_ids.append(next_id)
             piece = self._piece_by_id.get(next_id, "")
             piece = self._normalize_piece(piece)
-            self._emit_token_piece(piece, pair=1)
             if next_id == self._closing_quote_id:
                 break
             value_chars += piece
@@ -529,7 +521,6 @@ class ConstrainedDecoder:
             next_piece = self._piece_by_id.get(next_id, "").strip()
             if not next_piece or not all(c in valid_chars for c in next_piece):
                 break
-            self._emit_token_piece(next_piece, pair=1)
             value_str += next_piece
             current_ids.append(next_id)
 
@@ -574,8 +565,13 @@ class ConstrainedDecoder:
         Returns:
             Selected bool and ids including emitted literal tokens.
         """
-        true_score = self._score_word(current_ids, self._true_ids)
-        false_score = self._score_word(current_ids, self._false_ids)
+        gl = self._model.get_logits_from_input_ids
+        true_score = cumulative_sequence_logprob(
+            gl, current_ids, self._true_ids
+        )
+        false_score = cumulative_sequence_logprob(
+            gl, current_ids, self._false_ids
+        )
 
         if true_score >= false_score:
             current_ids = self._insert_tokens(current_ids, "true")
@@ -583,38 +579,6 @@ class ConstrainedDecoder:
 
         current_ids = self._insert_tokens(current_ids, "false")
         return False, current_ids
-
-    def _score_word(
-        self,
-        base_ids: list[int],
-        word_ids: list[int],
-    ) -> float:
-        """Sum log-probs for generating ``word_ids`` after ``base_ids``.
-
-        Args:
-            base_ids: Conditioning prefix token ids.
-            word_ids: Target token sequence (e.g. encoded ``true``).
-
-        Returns:
-            Total log score, or negative infinity if empty or impossible step.
-        """
-        if not word_ids:
-            return -math.inf
-
-        temp_ids = list(base_ids)
-        total = 0.0
-
-        for token_id in word_ids:
-            logits = self._model.get_logits_from_input_ids(temp_ids)
-            log_probs = log_softmax(logits)
-            total += (
-                float(log_probs[token_id])
-                if token_id < len(log_probs)
-                else -math.inf
-            )
-            temp_ids.append(token_id)
-
-        return total
 
     def _generate_regex_value(
         self,

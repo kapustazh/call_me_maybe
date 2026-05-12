@@ -230,18 +230,6 @@ class PipelineUIRenderer:
             )
             time.sleep(delay)
 
-    def log_info_stream(self, text: str) -> None:
-        """Stream ``text`` styled as info (cyan)."""
-        self.log_stream(text, pair=LogColorPair.INFO)
-
-    def log_ok_stream(self, text: str) -> None:
-        """Stream ``text`` styled as ok (green)."""
-        self.log_stream(text, pair=LogColorPair.OK)
-
-    def log_err_stream(self, text: str) -> None:
-        """Stream ``text`` styled as error (red)."""
-        self.log_stream(text, pair=LogColorPair.ERR)
-
     def wait_until_quit(self) -> None:
         """Block until the user confirms quit (q/Esc twice or SIGINT)."""
         self._app.call_from_thread(self._app.arm_quit_wait)

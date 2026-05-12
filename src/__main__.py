@@ -29,7 +29,7 @@ from argparse import ArgumentParser, Namespace
 
 from src import init_runtime_dirs
 from src.io_utils import JsonFileError, JsonValidationError
-from src.pipeline import Pipeline
+from src.pipeline import Pipeline, PipelineNoResultsError
 
 
 def main() -> None:
@@ -39,7 +39,8 @@ def main() -> None:
     Runs selection + constrained decoding. Writes results to output JSON file.
 
     Raises:
-        SystemExit: If input files missing/invalid or schema validation fails.
+        SystemExit: If input files missing/invalid, schema validation fails,
+            or no prompt produced a successful function call.
     """
     parser: ArgumentParser = argparse.ArgumentParser(
         prog="call_me_maybe",
@@ -83,6 +84,7 @@ def main() -> None:
         JsonFileError,
         JsonValidationError,
         ValueError,
+        PipelineNoResultsError,
     ) as exc:
         print(f"Error: {exc}")
         raise SystemExit(1) from exc

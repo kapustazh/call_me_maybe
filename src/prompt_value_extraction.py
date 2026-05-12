@@ -374,6 +374,13 @@ def ordered_numeric_strings(prompt: str) -> list[str]:
     ]
 
     def _inside_quotes(index: int) -> bool:
+        """
+        Args:
+            index: The index to check.
+
+        Returns:
+            True if the index is inside a quoted span, False otherwise.
+        """
         return any(start <= index < end for start, end in quoted_spans)
 
     for m in _DIGIT_NUMBER_RE.finditer(prompt):

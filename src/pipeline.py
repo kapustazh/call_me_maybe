@@ -29,11 +29,47 @@ _SGR_RED = "\033[31m"
 _SGR_RESET = "\033[0m"
 
 
+class PipelineNoResultsError(RuntimeError):
+    """Raised when every prompt failed selection or constrained decoding.
+
+    No rows are written to the output path in this case.
+    """
+
+
+def _pipeline_no_results_in_chain(
+    exc: BaseException,
+) -> PipelineNoResultsError | None:
+    """Return ``PipelineNoResultsError`` if it appears in ``exc``'s chain."""
+    from textual.worker import WorkerFailed
+
+    seen: set[int] = set()
+    stack: list[BaseException] = [exc]
+    while stack:
+        cur = stack.pop()
+        cid = id(cur)
+        if cid in seen:
+            continue
+        seen.add(cid)
+        if isinstance(cur, PipelineNoResultsError):
+            return cur
+        if isinstance(cur, WorkerFailed):
+            stack.append(cur.error)
+            continue
+        if cur.__cause__ is not None:
+            stack.append(cur.__cause__)
+        if cur.__context__ is not None:
+            stack.append(cur.__context__)
+    return None
+
+
 def _stream_ok_answer_line(
     renderer: PipelineUIRenderer | None,
     ok_line: str,
 ) -> None:
-    """Append success line char-by-char (TUI uses token-visual pacing)."""
+    """Append success line char-by-char.
+
+    TUI path uses ``log_token_visual``.
+    """
     text = ok_line + "\n"
     if renderer is not None:
         for ch in text:
@@ -111,6 +147,11 @@ class Pipeline:
 
         Writes only successful results to output file.
         Prompts that fail selection or decoding are skipped (stderr).
+
+        Raises:
+            PipelineNoResultsError: If no prompt produced a successful result
+                and the run used plain output (no TUI renderer). The interactive
+                path logs a summary and waits for quit instead of raising.
         """
         prompt_items = load_prompt_items(self.input_path)
         function_definitions = self._deduplicate_definitions(
@@ -142,108 +183,124 @@ class Pipeline:
             Args:
                 renderer: Interactive UI logger, or ``None`` for plain print.
             """
-            try:
-                out: list[FunctionResult] = []
-                skipped_count: int = 0
+            out: list[FunctionResult] = []
+            skipped_count: int = 0
 
-                for idx, item in enumerate(prompt_items, 1):
-                    header = f"[{idx}/{total}] Processing: {item.prompt}"
-                    if renderer is not None:
-                        renderer.log_stream(
-                            header + "\n",
-                            pair=LogColorPair.INFO,
-                        )
-                    else:
-                        if sys.stdout.isatty():
-                            print(
-                                f"{_SGR_CYAN}{header}{_SGR_RESET}",
-                            )
-                        else:
-                            print(header)
-                    try:
-                        selected_name = selector.select(item.prompt)
-                        function_definition = function_by_name.get(
-                            selected_name,
-                        )
-                        if function_definition is None:
-                            raise ValueError(
-                                "Selected unknown function name: "
-                                f"{selected_name}"
-                            )
-                        parameters = decoder.decode_parameters(
-                            item.prompt,
-                            function_definition,
-                        )
-                        result = FunctionResult(
-                            prompt=item.prompt,
-                            name=selected_name,
-                            parameters=parameters,
-                        )
-                        out.append(result)
-                        params_json = json.dumps(
-                            result.parameters,
-                            ensure_ascii=False,
-                        )
-                        ok_line = f"  \u2192 {selected_name}({params_json})"
-                        _stream_ok_answer_line(renderer, ok_line)
-                    except (
-                        FunctionSelectorError,
-                        ConstrainedDecodingError,
-                        ValueError,
-                    ) as exc:
-                        err_line = f"  \u2717 Skipped: {exc}"
-                        if renderer is not None:
-                            renderer.log_stream(
-                                err_line + "\n",
-                                pair=LogColorPair.ERR,
-                            )
-                        else:
-                            if sys.stderr.isatty():
-                                print(
-                                    f"{_SGR_RED}{err_line}{_SGR_RESET}",
-                                    file=sys.stderr,
-                                )
-                            else:
-                                print(err_line, file=sys.stderr)
-                        skipped_count += 1
-                        continue
-
-                if not out:
-                    print(
-                        "Warning: no successful results — output file "
-                        "not written.",
-                        file=sys.stderr,
+            for idx, item in enumerate(prompt_items, 1):
+                header = f"[{idx}/{total}] Processing: {item.prompt}"
+                if renderer is not None:
+                    renderer.log_stream(
+                        header + "\n",
+                        pair=LogColorPair.INFO,
                     )
                 else:
-                    write_function_results(self.output_path, out)
+                    if sys.stdout.isatty():
+                        print(
+                            f"{_SGR_CYAN}{header}{_SGR_RESET}",
+                        )
+                    else:
+                        print(header)
+                try:
+                    selected_name = selector.select(item.prompt)
+                    function_definition = function_by_name.get(
+                        selected_name,
+                    )
+                    if function_definition is None:
+                        raise ValueError(
+                            "Selected unknown function name: "
+                            f"{selected_name}"
+                        )
+                    parameters = decoder.decode_parameters(
+                        item.prompt,
+                        function_definition,
+                    )
+                    result = FunctionResult(
+                        prompt=item.prompt,
+                        name=selected_name,
+                        parameters=parameters,
+                    )
+                    out.append(result)
+                    params_json = json.dumps(
+                        result.parameters,
+                        ensure_ascii=False,
+                    )
+                    ok_line = f"  \u2192 {selected_name}({params_json})"
+                    _stream_ok_answer_line(renderer, ok_line)
+                except (
+                    FunctionSelectorError,
+                    ConstrainedDecodingError,
+                    ValueError,
+                ) as exc:
+                    err_line = f"  \u2717 Skipped: {exc}"
+                    if renderer is not None:
+                        renderer.log_stream(
+                            err_line + "\n",
+                            pair=LogColorPair.ERR,
+                        )
+                    else:
+                        if sys.stderr.isatty():
+                            print(
+                                f"{_SGR_RED}{err_line}{_SGR_RESET}",
+                                file=sys.stderr,
+                            )
+                        else:
+                            print(err_line, file=sys.stderr)
+                    skipped_count += 1
+                    continue
 
-                done_msg = (
-                    f"\nDone. {len(out)}/{total} results written"
-                    f" to {self.output_path}\n"
-                )
-                skip_msg = (
-                    f"Skipped {skipped_count} prompt(s) due to "
-                    "routing/decoding errors\n"
+            if not out:
+                msg = (
+                    f"0/{total} OK; {skipped_count} skipped; "
+                    f"output not written — nothing written to {self.output_path}."
                 )
                 if renderer is not None:
-                    renderer.log_stream(done_msg, pair=LogColorPair.PLAIN)
-                    if skipped_count:
-                        renderer.log_stream(skip_msg, pair=LogColorPair.ERR)
+                    renderer.log_stream(msg + "\n", pair=LogColorPair.ERR)
                     renderer.log_stream(
                         "\n[q] or [Esc] when done to quit\n",
                         pair=LogColorPair.PLAIN,
                     )
                     renderer.wait_until_quit()
+                    return
                 else:
-                    print(done_msg, end="")
-                    if skipped_count:
-                        print(skip_msg, end="", file=sys.stderr)
-            finally:
-                decoder.set_token_visual(None)
+                    if sys.stderr.isatty():
+                        print(
+                            f"{_SGR_RED}{msg}{_SGR_RESET}",
+                            file=sys.stderr,
+                        )
+                    else:
+                        print(msg, file=sys.stderr)
+                    raise PipelineNoResultsError(msg)
+
+            write_function_results(self.output_path, out)
+
+            done_msg = (
+                f"\nDone. {len(out)}/{total} results written"
+                f" to {self.output_path}\n"
+            )
+            skip_msg = (
+                f"Skipped {skipped_count} prompt(s) due to "
+                "routing/decoding errors\n"
+            )
+            if renderer is not None:
+                renderer.log_stream(done_msg, pair=LogColorPair.PLAIN)
+                if skipped_count:
+                    renderer.log_stream(skip_msg, pair=LogColorPair.ERR)
+                renderer.log_stream(
+                    "\n[q] or [Esc] when done to quit\n",
+                    pair=LogColorPair.PLAIN,
+                )
+                renderer.wait_until_quit()
+            else:
+                print(done_msg, end="")
+                if skipped_count:
+                    print(skip_msg, end="", file=sys.stderr)
 
         try:
             PipelineUIRenderer.run_interactive(_execute)
         except Exception as exc:
+            buried = _pipeline_no_results_in_chain(exc)
+            if buried is not None:
+                raise buried from exc
             print(
                 f"TUI unavailable, falling back to plain output: {exc}",
                 file=sys.stderr,

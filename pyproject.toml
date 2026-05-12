@@ -4,7 +4,6 @@ version = "1.0.0"
 description = "Function calling tool that translates natural language prompts into structured function calls"
 requires-python = ">=3.11"
 dependencies = [
-    "fire>=0.7.1",
     "llm-sdk",
     "numpy>=1.24.0",
     "pydantic>=2.0.0",

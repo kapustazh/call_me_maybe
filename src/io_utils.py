@@ -75,9 +75,15 @@ def load_function_definitions(path: str | Path) -> list[FunctionDefinition]:
 
     Raises:
         JsonFileError: If the file cannot be read or parsed.
-        JsonValidationError: If structure does not match the schema.
+        JsonValidationError: If structure does not match the schema, or the
+            array is empty.
     """
     data = load_json_file(path)
+    if not data:
+        raise JsonValidationError(
+            f"Function definitions file must contain at least one function: "
+            f"{path}"
+        )
     try:
         return TypeAdapter(list[FunctionDefinition]).validate_python(data)
     except ValidationError as exc:
@@ -98,9 +104,14 @@ def load_prompt_items(path: str | Path) -> list[PromptItem]:
 
     Raises:
         JsonFileError: If the file cannot be read or parsed.
-        JsonValidationError: If structure does not match the schema.
+        JsonValidationError: If structure does not match the schema, or the
+            array is empty.
     """
     data = load_json_file(path)
+    if data == []:
+        raise JsonValidationError(
+            f"Prompt tests file must contain at least one prompt: {path}"
+        )
     try:
         return TypeAdapter(list[PromptItem]).validate_python(data)
     except ValidationError as exc:

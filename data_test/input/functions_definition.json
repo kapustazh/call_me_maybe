@@ -166,5 +166,17 @@
     "returns": {
       "type": "number"
     }
-  }  
+  },
+  {
+    "name": "fn_predict_war_outcome",
+    "description": "Predict the outcome of the war.",
+    "parameters": {
+      "question": {
+        "type": "string"
+      }
+    },
+    "returns": {
+      "type": "string"
+    }
+  }
 ]

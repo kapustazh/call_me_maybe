@@ -5,7 +5,7 @@ import math
 from llm_sdk import Small_LLM_Model  # type: ignore
 
 from src import prompt_value_extraction as pvex
-from src.math_utils import log_softmax
+from src.math_utils import cumulative_sequence_logprob
 from src.tokenizer_vocab import encoded_to_token_ids
 
 _DEFAULT_NUMBER_REGEX: str = r"\d+"
@@ -58,37 +58,11 @@ class RegexValueResolver:
 
         best_candidate = candidates[0]
         best_score = -math.inf
+        gl = self._model.get_logits_from_input_ids
         for candidate in candidates:
             token_ids = encoded_to_token_ids(self._model.encode(candidate))
-            score = self._score_word(scoring_ids, token_ids)
+            score = cumulative_sequence_logprob(gl, scoring_ids, token_ids)
             if score > best_score:
                 best_score = score
                 best_candidate = candidate
         return best_candidate
-
-    def _score_word(self, base_ids: list[int], word_ids: list[int]) -> float:
-        """Sum log-probabilities of generating ``word_ids`` after ``base_ids``.
-
-        Args:
-            base_ids: Token ids of prompt prefix already fed to the model.
-            word_ids: Target continuation token ids (e.g. one regex literal).
-
-        Returns:
-            Total log-probability along the continuation. Negative infinity
-            if ``word_ids`` is empty or any step is impossible.
-        """
-        if not word_ids:
-            return -math.inf
-
-        history = list(base_ids)
-        total = 0.0
-        for token_id in word_ids:
-            logits = self._model.get_logits_from_input_ids(history)
-            log_probs = log_softmax(logits)
-            total += (
-                float(log_probs[token_id])
-                if token_id < len(log_probs)
-                else -math.inf
-            )
-            history.append(token_id)
-        return total

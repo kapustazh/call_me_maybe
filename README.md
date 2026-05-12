@@ -16,7 +16,9 @@ array of results:
 ```
 
 Rows that fail selection or decoding are skipped (message on stderr); the output
-file lists only successful calls.
+file lists only successful calls. If every prompt fails, no output file is written;
+the plain CLI path then exits with code 1, while the interactive TUI stays open
+with a summary until you quit (q / Esc).
 
 ## Description
 
@@ -36,8 +38,10 @@ other, with **color** where the terminal supports it. Text appears in a
 If the fancy UI cannot start (e.g. piped output, automated tests), the same run
 falls back to **normal line printing** on stdout/stderr.
 
-After all prompts finish and the result file is written, the program **waits**
-so you can read the log. Press **q** or **Esc** once to see a short **confirm**
+After all prompts finish, the program **waits** so you can read the log: when at
+least one call succeeded, the done line is shown first; when every prompt failed
+in the TUI, a short **0/N OK** summary is shown instead (still no output file).
+Press **q** or **Esc** once to see a short **confirm**
 line; press **q** or **Esc** again to leave. Any other key **cancels** that
 confirm and returns to the log. Then the terminal is restored to usual
 line-editing mode. Pressing **Ctrl+C** in that waiting state exits cleanly too.
