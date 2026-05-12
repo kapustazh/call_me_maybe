@@ -124,8 +124,9 @@ class Pipeline:
 
         Raises:
             PipelineNoResultsError: If no prompt produced a successful result
-                and the run used plain output (no TUI renderer). The interactive
-                path logs a summary and waits for quit instead of raising.
+                and the run used plain output (no TUI renderer). The
+                interactive path logs a summary and waits for quit instead of
+                raising.
         """
         prompt_items = load_prompt_items(self.input_path)
         function_definitions = self._deduplicate_definitions(

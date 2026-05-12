@@ -82,7 +82,7 @@ class ConstrainedDecoder:
         max_new_tokens_string: int = _DEFAULT_MAX_NEW_TOKENS_STRING,
         max_new_tokens_number: int = _DEFAULT_MAX_NEW_TOKENS_NUMBER,
     ) -> None:
-        """Wire the model, vocabulary, and precomputed allow-lists for decoding.
+        """Wire the model, vocab, and precomputed allow-lists for decoding.
 
         Quote, boolean, safe-string, and numeric token id sets are built once
         so greedy steps can mask logits cheaply.
