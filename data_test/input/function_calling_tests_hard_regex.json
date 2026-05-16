@@ -1,0 +1,47 @@
+[
+  {
+    "prompt": "Replace all dollar amounts without the dollar sign in 'I paid $100 for $250 worth of $50 items' with AMT"
+  },
+  {
+    "prompt": "Remove duplicate consecutive words from 'the the quick brown fox fox jumps' replacing each duplicated pair with a single word"
+  },
+  {
+    "prompt": "Strip all HTML tags from '<b>Hello</b> <i class=\"x\">World</i>' replacing with empty string"
+  },
+  {
+    "prompt": "Mask every email address in 'Contact john.doe+tag@sub.example.co.uk or admin@test.io for help' with [EMAIL]"
+  },
+  {
+    "prompt": "Redact valid IPv4 addresses in '192.168.1.1 and 10.0.0.256 and 8.8.8.8 are servers' with X.X.X.X (only octets 0-255 must match)"
+  },
+  {
+    "prompt": "Replace ISO 8601 dates in '2024-01-15 and 2025-12-31 are deadlines but 2025-13-40 is invalid' with DATE"
+  },
+  {
+    "prompt": "Replace formatted prices with thousands separators in 'Total is $1,234,567.89 and €9,999.99 today' with PRICE"
+  },
+  {
+    "prompt": "Find quoted CSV fields containing escaped quotes in 'name,\"John \"\"the boss\"\" Smith\",30' and replace each field with FIELD"
+  },
+  {
+    "prompt": "Replace integer literals not part of identifiers in 'var x123 = 42 + 100; y = 5' with NUM"
+  },
+  {
+    "prompt": "Match any unicode letter from any script in 'Hello мир 你好 123 ٱلسَّلَام' and replace with L"
+  },
+  {
+    "prompt": "Match runs of digits not followed by px in 'width 100px height 200 size 30px depth 7' replacing with N"
+  },
+  {
+    "prompt": "Match HTML attribute name=\"value\" pairs in '<a href=\"foo\" title=\"bar baz\" id=\"x\">' replacing each pair with ATTR"
+  },
+  {
+    "prompt": "Match US phone numbers in any common format in 'Call (555) 123-4567 or 555-123-4567 or +1 555.123.4567 today' with PHONE"
+  },
+  {
+    "prompt": "Match valid hexadecimal color codes (#RGB or #RRGGBB) in 'colors: #fff, #FF00aa, #12345, #GGG' with COLOR"
+  },
+  {
+    "prompt": "Match URLs with optional scheme in 'visit http://a.com, https://b.org/path?q=1, //c.io, d.net' replacing each with URL"
+  }
+]

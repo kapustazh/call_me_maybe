@@ -216,6 +216,8 @@ data/output/
 
 data_test/output/
 
+data_test_nested/output/
+
 src/*.txt
 
 new_data_set/output/

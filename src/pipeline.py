@@ -36,6 +36,32 @@ class PipelineNoResultsError(RuntimeError):
     """
 
 
+def _pipeline_no_results_in_chain(
+    exc: BaseException,
+) -> PipelineNoResultsError | None:
+    """Return ``PipelineNoResultsError`` if it appears in ``exc``'s chain."""
+    from textual.worker import WorkerFailed
+
+    seen: set[int] = set()
+    stack: list[BaseException] = [exc]
+    while stack:
+        cur = stack.pop()
+        cid = id(cur)
+        if cid in seen:
+            continue
+        seen.add(cid)
+        if isinstance(cur, PipelineNoResultsError):
+            return cur
+        if isinstance(cur, WorkerFailed):
+            stack.append(cur.error)
+            continue
+        if cur.__cause__ is not None:
+            stack.append(cur.__cause__)
+        if cur.__context__ is not None:
+            stack.append(cur.__context__)
+    return None
+
+
 def _stream_ok_answer_line(
     renderer: PipelineUIRenderer | None,
     ok_line: str,
@@ -273,7 +299,11 @@ class Pipeline:
         try:
             PipelineUIRenderer.run_interactive(_execute)
         except Exception as exc:
+            buried = _pipeline_no_results_in_chain(exc)
+            if buried is not None:
+                raise buried from exc
             print(
                 f"TUI unavailable, falling back to plain output: {exc}",
                 file=sys.stderr,
             )
+            _execute(None)
