@@ -10,9 +10,7 @@ from llm_sdk import Small_LLM_Model  # type: ignore
 
 from src.models import FunctionDefinition
 from src.prompt import BobThePrompter
-from src import prompt_value_extraction as pvex
 from src.tokenizer_vocab import TokenizerVocab, encoded_to_token_ids
-from src.regex_value_resolver import RegexValueResolver
 from src.math_utils import cumulative_sequence_logprob
 
 _SPACE_MARK = "Ġ"
@@ -28,14 +26,29 @@ class ConstrainedDecodingError(RuntimeError):
     """
 
 
+def _parse_number_text(
+    value_text: str, *, integer_only: bool
+) -> int | float | None:
+    """Parse digits produced by masked decoding into int/float."""
+    if integer_only:
+        try:
+            return int(float(value_text))
+        except ValueError:
+            return None
+    try:
+        return float(value_text)
+    except ValueError:
+        return None
+
+
 class ConstrainedDecoder:
     """Fill in a tool-call JSON body under hard token constraints.
 
     The model only sees allowed next tokens when emitting string bodies,
     numbers, and booleans, so the result stays syntactically valid for the
-    chosen :class:`~src.models.FunctionDefinition`. The high-level shape is
-    ``{"name": ..., "parameters": {...}}`` (the name and keys are inserted;
-    values are generated or taken from prompt heuristics).
+    chosen :class:`~src.models.FunctionDefinition`. Known structure
+    (name, keys, punctuation) is inserted; values are generated via logit
+    masking.
     """
 
     _DEFAULT_MAX_NEW_TOKENS_STRING = 50
@@ -43,30 +56,10 @@ class ConstrainedDecoder:
 
     @dataclass(frozen=True)
     class _ValueGenCtx:
-        """Bundle of everything a per-type value generator needs at one step.
-
-        Built inside :meth:`_generate_value` and passed to the small ``_gen_*``
-        helpers so they do not need long parameter lists.
-
-        Attributes:
-            current_ids: Token ids generated so far for the decode prefix.
-            param_type: JSON schema type key (``string``, ``number``, etc.).
-            is_regex_string: Whether this string parameter is routed through
-                the regex resolver.
-            prompt_text: Original user prompt (for heuristics and regex).
-            string_plain_index: Ordinal among non-regex string parameters, or
-                ``-1`` when this parameter is not in that group.
-            numeric_index: Ordinal among numeric parameters, or ``-1`` when
-                this parameter is not numeric.
-            integer_only: If ``True``, fractional numeric literals are invalid.
-        """
+        """Per-parameter generation context for ``_gen_*`` helpers."""
 
         current_ids: list[int]
         param_type: str
-        is_regex_string: bool
-        prompt_text: str
-        string_plain_index: int
-        numeric_index: int
         integer_only: bool
 
     _ValueGenerator = Callable[
@@ -84,9 +77,6 @@ class ConstrainedDecoder:
     ) -> None:
         """Wire the model, vocab, and precomputed allow-lists for decoding.
 
-        Quote, boolean, safe-string, and numeric token id sets are built once
-        so greedy steps can mask logits cheaply.
-
         Args:
             model: LLM wrapper providing logits and encoding helpers.
             tokenizer_vocab: Token id to decoded piece, for mask construction.
@@ -97,15 +87,11 @@ class ConstrainedDecoder:
         Raises:
             ConstrainedDecodingError: If the tokenizer yields no id for a
                 double-quote character (string literals cannot be closed).
-
-        Returns:
-            None
         """
         self._model: Small_LLM_Model = model
         self._max_new_tokens_string: int = max_new_tokens_string
         self._max_new_tokens_number: int = max_new_tokens_number
         self._prompter: BobThePrompter = BobThePrompter(functions)
-        self._regex_resolver = RegexValueResolver(model)
 
         self._piece_by_id: dict[int, str] = tokenizer_vocab.id_to_text_map()
 
@@ -143,15 +129,7 @@ class ConstrainedDecoder:
         }
 
     def _insert_tokens(self, current_ids: list[int], text: str) -> list[int]:
-        """Decode ``text`` with the model encoder and append ids to a copy.
-
-        Args:
-            current_ids: Existing token-id prefix.
-            text: Literal snippet to append (not masked sampling).
-
-        Returns:
-            New list: ``current_ids`` followed by encoded ``text``.
-        """
+        """Decode ``text`` with the model encoder and append ids to a copy."""
         text_token_ids = encoded_to_token_ids(self._model.encode(text))
         out = current_ids[:]
         for tid in text_token_ids:
@@ -180,22 +158,11 @@ class ConstrainedDecoder:
             function_definition,
         )
         input_ids = encoded_to_token_ids(self._model.encode(decode_prompt))
-        result = self._decode_full_call(
-            input_ids,
-            function_definition,
-            prompt_text=user_prompt,
-        )
+        result = self._decode_full_call(input_ids, function_definition)
         return dict(result["parameters"])
 
     def _build_safe_string_ids(self) -> set[int]:
-        """Collect vocab ids allowed inside JSON string quotes before closing.
-
-        Excludes pieces containing quote or newline controls; always includes
-        the closing quote token id.
-
-        Returns:
-            Set of legal continuation token ids for string body generation.
-        """
+        """Collect vocab ids allowed inside JSON string quotes before closing."""
         forbidden = {'"', "\n", "\r"}
         ids = {
             token_id
@@ -206,11 +173,7 @@ class ConstrainedDecoder:
         return ids
 
     def _build_valid_number_ids(self) -> set[int]:
-        """Collect vocab ids whose decoded pieces are numeric-character only.
-
-        Returns:
-            Set of token ids allowed when sampling numeric literals.
-        """
+        """Collect vocab ids whose decoded pieces are numeric-character only."""
         valid_chars = set("0123456789.-")
         out: set[int] = set()
         for token_id, piece in self._piece_by_id.items():
@@ -225,50 +188,10 @@ class ConstrainedDecoder:
         self,
         input_ids: list[int],
         chosen_function: FunctionDefinition,
-        *,
-        prompt_text: str,
     ) -> dict[str, Any]:
-        """Greedy-fill JSON tool-call structure matching ``chosen_function``.
-
-        Inserts function name and walks parameters in schema order, calling
-        ``_generate_value`` for each.
-
-        Args:
-            input_ids: Token ids for decode conditioning prompt.
-            chosen_function: Schema driving literal generation.
-            prompt_text: Raw user text (regex routing and heuristics).
-
-        Returns:
-            Dict with keys ``name`` and ``parameters`` (typed values).
-        """
-        self._last_regex_value: str | None = None
-
+        """Greedy-fill JSON tool-call structure matching ``chosen_function``."""
         current_ids = list(input_ids)
         parameters: dict[str, Any] = {}
-
-        param_names = list(chosen_function.parameters.keys())
-        string_params = [
-            p
-            for p in param_names
-            if chosen_function.parameters[p].type == "string"
-        ]
-        regex_string_params = {
-            p for p in string_params if pvex.is_regex_like_param_name(p)
-        }
-        if (
-            not regex_string_params
-            and pvex.prompt_requests_regex(prompt_text)
-            and len(string_params) >= 3
-        ):
-            regex_string_params.add(string_params[1])
-        string_params_plain = [
-            p for p in string_params if p not in regex_string_params
-        ]
-        numeric_params = [
-            p
-            for p in param_names
-            if chosen_function.parameters[p].type in ("number", "integer")
-        ]
 
         current_ids = self._insert_tokens(current_ids, chosen_function.name)
         current_ids = self._insert_tokens(current_ids, '", "parameters": {')
@@ -281,18 +204,6 @@ class ConstrainedDecoder:
             value, current_ids = self._generate_value(
                 current_ids=current_ids,
                 param_type=param_def.type,
-                is_regex_string=(param_name in regex_string_params),
-                prompt_text=prompt_text,
-                string_plain_index=(
-                    string_params_plain.index(param_name)
-                    if param_name in string_params_plain
-                    else -1
-                ),
-                numeric_index=(
-                    numeric_params.index(param_name)
-                    if param_name in numeric_params
-                    else -1
-                ),
                 integer_only=(param_def.type == "integer"),
             )
             parameters[param_name] = value
@@ -312,29 +223,9 @@ class ConstrainedDecoder:
         *,
         current_ids: list[int],
         param_type: str,
-        is_regex_string: bool,
-        prompt_text: str,
-        string_plain_index: int,
-        numeric_index: int,
         integer_only: bool,
     ) -> tuple[Any, list[int]]:
-        """Dispatch to string/number/boolean/object generators.
-
-        Args:
-            current_ids: Token ids before emitting this parameter value.
-            param_type: JSON schema type for this parameter.
-            is_regex_string: Route string params through regex resolver.
-            prompt_text: Original user prompt.
-            string_plain_index: Ordinal among plain string params.
-            numeric_index: Ordinal among numeric params.
-            integer_only: Integer schema coercion flag.
-
-        Returns:
-            Parsed Python value and updated token-id suffix.
-
-        Raises:
-            ConstrainedDecodingError: If ``param_type`` is unsupported.
-        """
+        """Dispatch to string/number/boolean/object generators."""
         generator = self._value_generators.get(param_type)
         if generator is None:
             raise ConstrainedDecodingError(
@@ -343,83 +234,36 @@ class ConstrainedDecoder:
         ctx = ConstrainedDecoder._ValueGenCtx(
             current_ids=current_ids,
             param_type=param_type,
-            is_regex_string=is_regex_string,
-            prompt_text=prompt_text,
-            string_plain_index=string_plain_index,
-            numeric_index=numeric_index,
             integer_only=integer_only,
         )
         return generator(ctx)
 
     def _gen_string(self, ctx: _ValueGenCtx) -> tuple[str, list[int]]:
-        """Generate a JSON string literal (plain or regex-specialized).
-
-        Args:
-            ctx: Current decoding context.
-
-        Returns:
-            Unquoted string value and extended ``current_ids``.
-        """
-        if ctx.is_regex_string:
-            return self._generate_regex_value(ctx.current_ids, ctx.prompt_text)
-        return self._generate_string_value(
-            ctx.current_ids,
-            prompt_text=ctx.prompt_text,
-            string_plain_index=ctx.string_plain_index,
-        )
+        """Generate a JSON string literal via masked greedy decoding."""
+        return self._generate_string_value(ctx.current_ids)
 
     def _gen_number(self, ctx: _ValueGenCtx) -> tuple[int | float, list[int]]:
-        """Generate a JSON number literal per schema (int vs float).
-
-        Args:
-            ctx: Current decoding context.
-
-        Returns:
-            Parsed numeric value and extended ``current_ids``.
-        """
+        """Generate a JSON number literal via masked greedy decoding."""
         return self._generate_number_value(
             ctx.current_ids,
             param_type=ctx.param_type,
-            prompt_text=ctx.prompt_text,
-            numeric_index=ctx.numeric_index,
             integer_only=ctx.integer_only,
         )
 
     def _gen_boolean(self, ctx: _ValueGenCtx) -> tuple[bool, list[int]]:
-        """Emit JSON ``true`` or ``false`` using token log-prob tie-break.
-
-        Args:
-            ctx: Current decoding context (uses ``current_ids`` only).
-
-        Returns:
-            Boolean value and extended ``current_ids``.
-        """
+        """Emit JSON ``true`` or ``false`` using token log-prob tie-break."""
         return self._generate_boolean_value(ctx.current_ids)
 
     def _gen_object(
         self, ctx: _ValueGenCtx
     ) -> tuple[dict[str, object], list[int]]:
-        """Emit empty JSON object literal ``{}``.
-
-        Args:
-            ctx: Current decoding context.
-
-        Returns:
-            Empty dict and ids with ``{}`` tokens appended.
-        """
+        """Emit empty JSON object literal ``{}``."""
         next_ids = self._insert_tokens(ctx.current_ids, "{}")
         return {}, next_ids
 
     @staticmethod
     def _normalize_piece(piece: str) -> str:
-        """Strip SentencePiece-style markers from a tokenizer piece.
-
-        Args:
-            piece: Raw decoded vocabulary fragment.
-
-        Returns:
-            Piece suitable for concatenating into JSON string body text.
-        """
+        """Strip SentencePiece-style markers from a tokenizer piece."""
         return (
             piece.replace(_SPACE_MARK, " ")
             .replace(_NEWLINE_MARK, "")
@@ -429,34 +273,15 @@ class ConstrainedDecoder:
     def _generate_string_value(
         self,
         current_ids: list[int],
-        *,
-        prompt_text: str,
-        string_plain_index: int,
     ) -> tuple[str, list[int]]:
-        """Sample or extract a non-regex string literal.
+        """Masked greedy decoding until closing quote.
 
-        Uses :mod:`src.prompt_value_extraction` heuristics first; otherwise
-        masked greedy decoding until closing quote.
-
-        Args:
-            current_ids: Prefix ids before opening quote.
-            prompt_text: Original user prompt.
-            string_plain_index: Which plain string parameter this value is.
-
-        Returns:
-            Inner string content (without JSON escapes) and extended ids.
+        Raises:
+            ConstrainedDecodingError: If the closing quote is never emitted.
         """
-        extracted = pvex.try_non_regex_string(
-            prompt_text,
-            string_plain_index,
-            self._last_regex_value,
-        )
-        if extracted is not None:
-            current_ids = self._insert_tokens(current_ids, f'"{extracted}"')
-            return extracted, current_ids
-
         current_ids = self._insert_tokens(current_ids, '"')
         value_chars = ""
+        closed = False
         for _ in range(self._max_new_tokens_string):
             logits = self._model.get_logits_from_input_ids(current_ids)
             masked = self._apply_mask(logits, self._safe_string_ids_arr)
@@ -465,8 +290,13 @@ class ConstrainedDecoder:
             piece = self._piece_by_id.get(next_id, "")
             piece = self._normalize_piece(piece)
             if next_id == self._closing_quote_id:
+                closed = True
                 break
             value_chars += piece
+        if not closed:
+            raise ConstrainedDecodingError(
+                "String decode exceeded max tokens without closing quote"
+            )
         inner = value_chars.strip().split("\\n")[0].strip()
         return inner, current_ids
 
@@ -475,35 +305,13 @@ class ConstrainedDecoder:
         current_ids: list[int],
         param_type: str,
         *,
-        prompt_text: str,
-        numeric_index: int,
         integer_only: bool,
     ) -> tuple[int | float, list[int]]:
-        """Parse numeric literal from prompt index or sample digit tokens.
+        """Sample digit tokens under a numeric allow-list.
 
-        Args:
-            current_ids: Prefix ids before numeric literal starts.
-            param_type: ``number`` or ``integer`` schema discriminator.
-            prompt_text: Original user prompt.
-            numeric_index: Which numeric slot to read from prompt (-1 skips).
-            integer_only: Integer schema flag.
-
-        Returns:
-            Parsed Python number and extended ids.
+        Raises:
+            ConstrainedDecodingError: If no valid numeric literal is produced.
         """
-        if numeric_index >= 0:
-            parsed = pvex.parse_numeric_at_index(
-                prompt_text,
-                numeric_index,
-                integer_only=integer_only,
-            )
-            if parsed is not None:
-                fragment = (
-                    repr(parsed) if isinstance(parsed, float) else str(parsed)
-                )
-                current_ids = self._insert_tokens(current_ids, fragment)
-                return parsed, current_ids
-
         valid_chars: set[str] = set("0123456789.-")
         value_str = ""
         for _ in range(self._max_new_tokens_number):
@@ -525,46 +333,28 @@ class ConstrainedDecoder:
             current_ids.append(next_id)
 
         if not value_str:
-            return (0 if param_type == "integer" else 0.0), current_ids
-        parsed = pvex.parse_number_text(
-            value_str,
-            integer_only=(param_type == "integer"),
-        )
+            raise ConstrainedDecodingError(
+                f"Failed to decode {param_type} literal"
+            )
+        parsed = _parse_number_text(value_str, integer_only=integer_only)
         if parsed is None:
-            return 0.0, current_ids
+            raise ConstrainedDecodingError(
+                f"Invalid {param_type} literal: {value_str!r}"
+            )
         return parsed, current_ids
 
     @staticmethod
     def _numeric_literal_complete(value_str: str, integer_only: bool) -> bool:
-        """Return True if ``value_str`` is a complete valid numeric literal.
-
-        Args:
-            value_str: Accumulated characters from tokenizer pieces.
-            integer_only: Whether to validate as integer.
-
-        Returns:
-            True when :func:`~src.prompt_value_extraction.parse_number_text`
-            succeeds.
-        """
+        """Return True if ``value_str`` is a complete valid numeric literal."""
         if not value_str:
             return False
-        return (
-            pvex.parse_number_text(value_str, integer_only=integer_only)
-            is not None
-        )
+        return _parse_number_text(value_str, integer_only=integer_only) is not None
 
     def _generate_boolean_value(
         self,
         current_ids: list[int],
     ) -> tuple[bool, list[int]]:
-        """Choose ``true`` vs ``false`` by cumulative token log-probability.
-
-        Args:
-            current_ids: Prefix ids immediately before boolean literal.
-
-        Returns:
-            Selected bool and ids including emitted literal tokens.
-        """
+        """Choose ``true`` vs ``false`` by cumulative token log-probability."""
         gl = self._model.get_logits_from_input_ids
         true_score = cumulative_sequence_logprob(
             gl, current_ids, self._true_ids
@@ -580,41 +370,14 @@ class ConstrainedDecoder:
         current_ids = self._insert_tokens(current_ids, "false")
         return False, current_ids
 
-    def _generate_regex_value(
-        self,
-        current_ids: list[int],
-        prompt_text: str,
-    ) -> tuple[str, list[int]]:
-        """Resolve regex pattern via ``RegexValueResolver``.
-
-        Args:
-            current_ids: Prefix ids before string literal.
-            prompt_text: User prompt for resolver heuristics.
-
-        Returns:
-            Pattern string and ids with quoted literal appended.
-        """
-        pattern = self._regex_resolver.resolve(prompt_text)
-        self._last_regex_value = pattern
-        current_ids = self._insert_tokens(current_ids, f'"{pattern}"')
-        return pattern, current_ids
-
     def _apply_mask(
         self,
         logits: list[float],
         valid_ids_arr: npt.NDArray[np.int32],
     ) -> npt.NDArray[np.float32]:
-        """Restrict logits to allowed vocab ids; mask others as ``-inf``.
-
-        Args:
-            logits: Full vocabulary logits from model.
-            valid_ids_arr: Row vector of legal token indices.
-
-        Returns:
-            Same-length float array suitable for ``argmax`` sampling.
-        """
+        """Restrict logits to allowed vocab ids; mask others as ``-inf``."""
         arr = np.full(len(logits), -np.inf, dtype=np.float32)
-        logits_arr = np.array(logits, dtype=np.float32)
+        logits_arr = np.asarray(logits, dtype=np.float32)
         valid_ids_arr = valid_ids_arr[valid_ids_arr < len(arr)]
         arr[valid_ids_arr] = logits_arr[valid_ids_arr]
         return arr

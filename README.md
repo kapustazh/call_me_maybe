@@ -3,9 +3,8 @@
 # call_me_maybe
 
 Small-model **function calling**: read prompts and a function schema (JSON),
-pick a function with the LM under a confidence gate, extract typed parameters
-with constrained decoding plus light heuristics where helpful, and write a JSON
-array of results.
+pick a function with the LM under a confidence gate, fill typed parameters
+with constrained decoding (logit masking), and write a JSON array of results.
 
 Reliable structured output from a ~0.6B causal LM (`Qwen/Qwen3-0.6B` by default
 via `llm_sdk`), not free-form JSON from the model alone. The pipeline loads
@@ -121,13 +120,9 @@ Same flags as `uv run -m src …`:
      the same prompt ending at token level.
    - Score candidates from model logits at the decision boundary, apply softmax,
      then enforce a **minimum confidence threshold**.
-   - Add a small **lexical overlap bonus** (prompt vs tool name/description) to
-     reduce “random but confident” routing when words clearly match a tool.
 3. Decode parameters for chosen function:
-   - For each parameter, try safe **pattern-based extraction** from the prompt
-     (numbers, quoted spans, paths, templates, etc.).
-   - Otherwise, generate exactly one JSON literal with **logit masking**
-     (constrained decoding) so only type-valid tokens are allowed.
+   - Generate each JSON literal with **logit masking** (constrained decoding)
+     so only type-valid tokens are allowed.
 
 ## Design choices
 
@@ -136,8 +131,8 @@ Same flags as `uv run -m src …`:
   the decoder core.
 - **Tokenizer JSON first**, flat vocab fallback (`TokenizerVocab`) so masks
   match the loaded model.
-- **Heuristics** only as fast path / fallback for obvious patterns (numbers,
-  quoted strings, etc.); routing stays LLM-based.
+- **No prompt heuristics** — function choice and parameter values come from the
+  LLM under constraints only.
 
 ## Performance and reliability
 

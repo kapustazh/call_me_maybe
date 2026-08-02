@@ -1,12 +1,8 @@
 from __future__ import annotations
-from re import Pattern
-
 
 import math
-import re
 from collections import defaultdict
 from dataclasses import dataclass
-
 
 from llm_sdk import Small_LLM_Model  # type: ignore
 from src.tokenizer_vocab import encoded_to_token_ids
@@ -16,35 +12,7 @@ from src.prompt import BobThePrompter
 from src.math_utils import softmax
 
 _UNIFORM_MULTIPLIER = 4.5
-_LEXICAL_BONUS_WEIGHT = 4.5
-_NO_LEXICAL_SUPPORT_MIN_CONFIDENCE = 0.90
 _MAX_SELECTION_THRESHOLD = 0.90
-_WORD_RE: Pattern[str] = re.compile(r"[a-z0-9]+")
-_STOPWORDS: set[str] = {
-    "a",
-    "an",
-    "and",
-    "are",
-    "be",
-    "by",
-    "for",
-    "from",
-    "has",
-    "how",
-    "i",
-    "in",
-    "is",
-    "it",
-    "of",
-    "on",
-    "or",
-    "please",
-    "the",
-    "to",
-    "what",
-    "with",
-    "you",
-}
 
 
 class FunctionSelectorError(Exception):
@@ -80,11 +48,11 @@ def adaptive_threshold(n_candidates: int) -> float:
 
 
 class FunctionSelector:
-    """Score-first-token logits plus lexical bonus to route prompts to tools.
+    """Route prompts to tools from LLM logits over function-name candidates.
 
     Builds tokenized continuations after a shared prefix from
-    :class:`~src.prompt.BobThePrompter`, adds overlap-based tie-breakers,
-    then validates confidence on a softmax over candidate scores.
+    :class:`~src.prompt.BobThePrompter`, then validates confidence on a
+    softmax over candidate scores.
     """
 
     def __init__(
@@ -161,84 +129,13 @@ class FunctionSelector:
             )
         return candidates
 
-    @staticmethod
-    def _normalize_terms(text: str) -> set[str]:
-        """Extract lowercase alphanumeric tokens from text for overlap checks.
-
-        Args:
-            text: Arbitrary natural-language or identifier string.
-
-        Returns:
-            Set of tokens with underscores treated as spaces and stopwords
-            removed (including literal ``fn`` token).
-        """
-        terms = set(_WORD_RE.findall(text.lower().replace("_", " ")))
-        filtered = {
-            term for term in terms if term not in _STOPWORDS and term != "fn"
-        }
-        return set(filtered)
-
-    def _lexical_overlap_count(
-        self,
-        user_prompt: str,
-        function_definition: FunctionDefinition,
-    ) -> int:
-        """Count normalized terms shared between prompt and function metadata.
-
-        Args:
-            user_prompt: Raw user request.
-            function_definition: Candidate tool schema.
-
-        Returns:
-            Intersection size (non-negative integer).
-        """
-        prompt_terms = self._normalize_terms(user_prompt)
-        if not prompt_terms:
-            return 0
-
-        function_text = (
-            f"{function_definition.name} {function_definition.description}"
-        )
-        function_terms = self._normalize_terms(function_text)
-        overlap = prompt_terms & function_terms
-        return len(overlap)
-
-    def _lexical_bonus(
-        self,
-        user_prompt: str,
-        function_definition: FunctionDefinition,
-    ) -> float:
-        """Additive score bump proportional to lexical overlap count.
-
-        Args:
-            user_prompt: Raw user request.
-            function_definition: Candidate tool schema.
-
-        Returns:
-            Weighted bonus (zero when no overlap).
-        """
-        overlap_count = self._lexical_overlap_count(
-            user_prompt, function_definition
-        )
-        if overlap_count <= 0:
-            return 0.0
-
-        return float(overlap_count) * _LEXICAL_BONUS_WEIGHT
-
     def _validate_confidence(
         self,
         probs: list[float],
         best_index: int,
         best_name: str,
-        best_overlap_count: int,
     ) -> None:
-        """Validate selection probability against thresholds.
-
-        Args:
-            probs: Probability distribution over candidates.
-            best_index: Index of chosen candidate.
-            best_name: Chosen function name (for error messages).
-            best_overlap_count: Lexical overlap count for chosen function.
+        """Validate selection probability against threshold.
 
         Raises:
             FunctionSelectorError: If confidence is below threshold.
@@ -249,46 +146,19 @@ class FunctionSelector:
                 f"Low selection confidence: {confidence:.3f} < "
                 f"{self._threshold:.3f} for '{best_name}'"
             )
-        if (
-            best_overlap_count <= 0
-            and confidence < _NO_LEXICAL_SUPPORT_MIN_CONFIDENCE
-        ):
-            raise FunctionSelectorError(
-                "Selection has no lexical support: "
-                f"{confidence:.3f} < "
-                f"{_NO_LEXICAL_SUPPORT_MIN_CONFIDENCE:.3f} for '{best_name}'"
-            )
 
-    def _candidate_scores(
-        self,
-        base_ids: list[int],
-        user_prompt: str,
-    ) -> list[float]:
-        """Compute per-candidate selection scores from model logits.
-
-        Args:
-            base_ids: Token ids for selection prompt prefix.
-            user_prompt: Raw user request (for lexical bonus).
-
-        Returns:
-            List of scores aligned to "self._candidates".
-        """
+    def _candidate_scores(self, base_ids: list[int]) -> list[float]:
+        """Compute per-candidate selection scores from model logits."""
         logits = self._model.get_logits_from_input_ids(base_ids)
         scores: list[float] = []
         groups: dict[int, list[int]] = defaultdict(list)
-        for candidate, function_definition in zip(
-            self._candidates,
-            self._functions,
-        ):
+        for candidate in self._candidates:
             first_token = candidate.distinguishing_ids[0]
             groups[first_token].append(len(scores))
             if first_token >= len(logits):
                 scores.append(-math.inf)
                 continue
-            scores.append(
-                float(logits[first_token])
-                + self._lexical_bonus(user_prompt, function_definition)
-            )
+            scores.append(float(logits[first_token]))
 
         for first_token, indices in groups.items():
             if len(indices) <= 1:
@@ -312,15 +182,7 @@ class FunctionSelector:
         base_ids: list[int],
         continuation_ids: tuple[int, ...],
     ) -> float:
-        """Score continuation tokens to break first-token ties.
-
-        Args:
-            base_ids: Prompt ids including the tied first token.
-            continuation_ids: Remaining token ids for candidate name.
-
-        Returns:
-            Weighted log-prob score for continuation (or -inf if impossible).
-        """
+        """Score continuation tokens to break first-token ties."""
         if not continuation_ids:
             return 0.0
         weighted_score = 0.0
@@ -350,7 +212,7 @@ class FunctionSelector:
         """
         prompt = self._prompter.build_selection_prompt(user_prompt)
         base_ids = encoded_to_token_ids(self._model.encode(prompt))
-        scores = self._candidate_scores(base_ids, user_prompt)
+        scores = self._candidate_scores(base_ids)
         if not scores or all(
             math.isinf(score) and score < 0 for score in scores
         ):
@@ -361,14 +223,5 @@ class FunctionSelector:
         probs = softmax(scores)
         best_index = max(range(len(probs)), key=probs.__getitem__)
         best_name = self._candidates[best_index].name
-        best_overlap_count = self._lexical_overlap_count(
-            user_prompt, self._functions[best_index]
-        )
-
-        self._validate_confidence(
-            probs,
-            best_index,
-            best_name,
-            best_overlap_count,
-        )
+        self._validate_confidence(probs, best_index, best_name)
         return best_name

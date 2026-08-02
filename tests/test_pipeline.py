@@ -30,32 +30,34 @@ class FakePipelineModel:
 
     def get_logits_from_input_ids(self, input_ids: list[int]) -> list[float]:
         text = "".join(chr(token_id) for token_id in input_ids)
-        if "JSON literal:" not in text:
-            logits = [-100.0] * 256
-            if 'Request: "' in text:
-                user_part = text.split('Request: "', 1)[1].split('"', 1)[0]
-                if "sum" in user_part.lower():
-                    logits[ord("a")] = 10.0
-                    logits[ord("g")] = 1.0
-            return logits
-        marker = "JSON literal:"
-        marker_pos = text.rfind(marker)
-        end_marker = marker_pos + len(marker)
-        generated = "" if marker_pos < 0 else text[end_marker:]
-        if "Function name: fn_add_numbers" in text:
-            if "Parameter: a" in text:
-                target = "2"
-            elif "Parameter: b" in text:
-                target = "3"
-            else:
-                target = "0"
-        else:
-            return [0.0] * 256
-        next_char = (
-            target[len(generated)] if len(generated) < len(target) else " "
-        )
-        logits = [-1000.0] * 256
-        logits[ord(next_char)] = 1000.0
+
+        def emit(ch: str) -> list[float]:
+            out = [-1000.0] * 256
+            out[ord(ch)] = 1000.0
+            return out
+
+        if "You are parameters extraction assistant from text" in text:
+            if "fn_add_numbers" in text:
+                m = re.search(r'"a":\s*([0-9.]*)$', text)
+                if m:
+                    target = "2"
+                    partial = m.group(1)
+                    if len(partial) < len(target):
+                        return emit(target[len(partial)])
+                m = re.search(r'"b":\s*([0-9.]*)$', text)
+                if m:
+                    target = "3"
+                    partial = m.group(1)
+                    if len(partial) < len(target):
+                        return emit(target[len(partial)])
+            return [-1000.0] * 256
+
+        logits = [-100.0] * 256
+        if 'Request: "' in text:
+            user_part = text.split('Request: "', 1)[1].split('"', 1)[0]
+            if "sum" in user_part.lower():
+                logits[ord("a")] = 10.0
+                logits[ord("g")] = 1.0
         return logits
 
     def get_path_to_tokenizer_file(self) -> str:
@@ -139,6 +141,7 @@ class GoldenPipelineModel:
             partial = m.group(1)
             if len(partial) < len(val):
                 return emit(val[len(partial)])
+            return emit('"')
 
         for pname, val in params.items():
             if isinstance(val, bool) or isinstance(val, str):
